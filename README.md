@@ -24,7 +24,7 @@ The caller passes an explicit session `root`; the library never guesses a defaul
 
 The dependency-free Python library and CLI index each transcript in one pass using byte offsets. Memory holds a compact record per line; full content is read on demand. This avoids loading a several-hundred-megabyte transcript in full for each browse operation. An in-process LRU cache holds three indexes, keyed by path, mtime and size.
 
-The engine was extracted for the conversation panel in [task-console](https://github.com/DaizeDong/task-console). It operates on one session at a time; session listing and the user interface belong to the caller.
+The engine operates on one session at a time; session listing and the user interface belong to the caller.
 
 ## Install
 
@@ -74,10 +74,6 @@ convo-chain --version
 Exit codes: `0` success, `1` refused (`{"error": {"code", "message"}}` on stdout), `2` usage error, `3` not checked (no usable root), `4` internal failure (`{"error": {"code": "internal", "message": <exception class name>}}` on stdout, a bug or an unreadable file rather than a refusal). An explicit `--root`, even `--root ""`, is never replaced by `CONVO_CHAIN_ROOT`. `export --out` writes the Markdown to a file with exclusive create and refuses a target inside a git work tree, for the same reason `fork` does. `python -m convo_chain` works the same way.
 
 The CLI rebuilds the index on every call. A long lived caller should import the library so the cache survives between requests.
-
-## How task-console consumes it
-
-task-console imports `convo-chain` as a pinned library so the index cache lives in the console process. The console owns the HTTP routes, request checks and interface, and passes `TASK_CONSOLE_SESSIONS` as `root`. This library owns transcript semantics and file transactions; it never reads a `TASK_CONSOLE_*` variable.
 
 ## Where the data lives
 

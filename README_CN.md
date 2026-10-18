@@ -24,7 +24,7 @@
 
 零依赖 Python 库和 CLI 通过一次扫描建立字节偏移索引。内存中每行只保留紧凑记录，完整内容按需读取，避免每次浏览都完整加载数百 MB 的转录。进程内 LRU 缓存保留三份索引，以路径、mtime 和大小为键。
 
-这套引擎为 [task-console](https://github.com/DaizeDong/task-console) 的对话面板提取，按单个会话工作；会话列表和用户界面由调用方负责。
+这套引擎按单个会话工作；会话列表和用户界面由调用方负责。
 
 ## 安装
 
@@ -74,10 +74,6 @@ convo-chain --version
 退出码:`0` 成功,`1` 被拒(stdout 上是 `{"error": {"code", "message"}}`),`2` 用法错误,`3` 未检查(没有可用的根目录),`4` 内部故障(stdout 上是 `{"error": {"code": "internal", "message": <异常类名>}}`,说明是程序缺陷或文件读不了,不是拒绝)。显式给了 `--root`,哪怕是 `--root ""`,也绝不会被 `CONVO_CHAIN_ROOT` 顶替。`export --out` 把 Markdown 独占创建写进文件,目标在 git 工作树里就拒绝,理由和 `fork` 一样。`python -m convo_chain` 用法相同。
 
 CLI 每次调用都重建索引。长期运行的调用方应该直接导入这个库,让缓存在请求之间留住。
-
-## task-console 怎么用它
-
-task-console 把 `convo-chain` 作为固定版本的库在进程内导入，让索引缓存留在控制台进程里。控制台负责 HTTP 路由、请求校验和界面，并把 `TASK_CONSOLE_SESSIONS` 作为 `root` 传入。库负责转录语义与文件事务，不读取任何 `TASK_CONSOLE_*` 环境变量。
 
 ## 数据放在哪
 

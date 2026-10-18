@@ -9,7 +9,7 @@
 Every subcommand takes `--root DIR` (the directory holding one folder per project, each with
 `<session-id>.jsonl` files). Without it the CLI falls back to the `CONVO_CHAIN_ROOT` environment
 variable. That fallback lives HERE and only here: the library itself never reads the environment,
-so a caller that embeds it (task-console does) decides where the root comes from.
+so a caller that embeds it decides where the root comes from.
 
 Exit codes are part of the contract, so a script can branch without parsing prose:
 

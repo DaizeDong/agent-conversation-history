@@ -7,7 +7,14 @@ Public API (everything else is private and may change):
     export_md(sid, to, frm=None, leaf=None, sub=None,
               include_tools=False, include_thinking=False, root=...)
                                                        a Markdown export of [frm, to]
-    fork(sid, at, leaf=None, sub=None, root=...)       write a NEW session file forked at `at`
+    fork(sid, at, leaf=None, sub=None, root=..., full=True)
+                                                       write a NEW session file forked at `at`; full
+                                                       copies the whole history, full=False only what
+                                                       the model saw after the last compaction
+    export_full(sid, to, frm=None, include_tools=..., include_thinking=..., root=...)
+                                                       export_md plus the parent session's earlier history
+    inline_ancestors(sid, root=..., is_live=None)      write that earlier history into the session's own file
+    dependents(sid, root)                              sessions whose earlier history lives only in `sid`
     locate(sid, sub=None, root=...)                    resolve ids to a file under root
     rename(sid, title, root=...)                      persist a native custom title
     move(sid, target_project, root=...)               migrate transcript, sidecars and indexes
@@ -30,6 +37,7 @@ from .core import (CACHE_SLOTS, chain, clear_cache, export_md, fork, locate, nod
 from .errors import ConvoChainError, Unavailable
 from .session_ops import move, rename, project_info, recover_pending
 from .deletion import delete, delete_plan
+from .lineage import dependents, export_full, inline_ancestors
 from .transcript import looks_injected, typed_text
 
 __version__ = "0.3.0"
@@ -38,5 +46,5 @@ __all__ = [
     "CACHE_SLOTS", "ConvoChainError", "Unavailable", "__version__", "chain", "clear_cache",
     "export_md", "fork", "locate", "looks_injected", "node", "resume_command", "shape",
     "typed_text", "move", "rename", "project_info", "recover_pending",
-    "delete", "delete_plan",
+    "delete", "delete_plan", "dependents", "export_full", "inline_ancestors",
 ]

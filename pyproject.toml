@@ -28,6 +28,9 @@ convo-chain = "convo_chain.cli:main"
 [tool.setuptools]
 include-package-data = false
 
+[tool.setuptools.package-data]
+convo_chain = ["web_static/*.html"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["convo_chain", "convo_chain.*"]

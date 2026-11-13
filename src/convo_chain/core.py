@@ -1247,6 +1247,20 @@ def _relinked_parent(ix: Index, b: int):
     return parent, P, anc
 
 
+def _full_chain(ix: Index, atk: int):
+    """整段分叉的链:显示链走到 atk,跨过每个压缩边界,原样一行不少。
+    返回值形状同 _fork_chain:(节点顺序, 起始边界=None, 被保留消息=[], 提示)。"""
+    E = ix.E
+    order = _path(ix, atk)[0]
+    got = {r for k in order for r in E[k]["rids"]}
+    open_ = [t for k in order for t in E[k]["tids"] if t not in got]
+    notes = []
+    if open_:
+        notes.append(f"{len(open_)} 个工具调用在分叉里没有对应的结果"
+                     "(结果不在这条链上),恢复后模型会看到它们没有返回")
+    return order, None, [], notes
+
+
 def _fork_chain(ix: Index, atk: int) -> tuple[list, int | None, list, list]:
     """节点 at 那一刻模型真正拿到的上下文,按链顺序。返回 (链, 边界, 实际带上的被保留消息, 警告)。
 
@@ -1373,8 +1387,12 @@ def _dump(o) -> str:
     return json.dumps(o, ensure_ascii=False, separators=(",", ":"))
 
 
-def fork(sid, at, leaf=None, sub=None, root=None, request_id=None) -> dict:
-    """在节点 at 处分叉出一个新会话文件。只写一份新文件,源文件只读。"""
+def fork(sid, at, leaf=None, sub=None, root=None, request_id=None, full=True) -> dict:
+    """在节点 at 处分叉出一个新会话文件。只写一份新文件,源文件只读。
+
+    full=True(默认)把 at 之前的整段显示链原样带上,经过的每个压缩边界都保留,
+    新文件自带全部历史,父会话之后删掉也不丢。full=False 是老行为:只带最近一个压缩边界
+    之后模型真正看到的那一段。"""
     shape(sid, sub=sub, leaf=leaf, required=("at",), at=at)
     if request_id is not None:
         _check_uuid(request_id, "请求")
@@ -1390,12 +1408,13 @@ def fork(sid, at, leaf=None, sub=None, root=None, request_id=None) -> dict:
     atk = ix.by.get(at)
     if atk is None or atk not in set(order):
         raise ConvoChainError("分叉点不在当前显示的链上", "not_on_path")
-    ks, endb, pres_used, notes = _fork_chain(ix, atk)
+    ks, endb, pres_used, notes = _full_chain(ix, atk) if full else _fork_chain(ix, atk)
     raws = _read_lines(ix, ks)
     kept_pres = [E[k]["u"] for k in pres_used]
 
     new = str(_uuid.uuid5(_uuid.NAMESPACE_URL, json.dumps(
-        [str(loc["base"].resolve()), sid, at, leaf, request_id]))) if request_id else str(_uuid.uuid4())
+        [str(loc["base"].resolve()), sid, at, leaf, request_id] + (["full"] if full else [])))) \
+        if request_id else str(_uuid.uuid4())
     if request_id:
         try:
             existing = locate(new, root=root)
@@ -1411,12 +1430,20 @@ def fork(sid, at, leaf=None, sub=None, root=None, request_id=None) -> dict:
                           leafUuid=saved.get("leaf"), fromBoundary=None)
             return result
     lines, prev, emitted_bytes, last_ua = [], None, 0, None
+    included = {E[k]["u"] for k in ks}
+    relinked = 0
     for k in ks:
         o = _obj(raws[k], E[k]["u"])
         o["sessionId"] = new
         if "session_id" in o:
             o["session_id"] = new
-        o["parentUuid"] = prev
+        if not full:
+            o["parentUuid"] = prev
+        elif E[k]["kind"] == "compact":
+            o["parentUuid"] = None           # 压缩边界本来就是新一段的根,逻辑父在 logicalParentUuid
+        elif o.get("parentUuid") not in included:
+            relinked += 1                     # 原父节点不在这条链上,接到上一行,别悬空
+            o["parentUuid"] = prev
         o["isSidechain"] = False
         o.pop("sessionKind", None)
         if o.get("type") == "system" and o.get("subtype") == "model_refusal_fallback":
@@ -1433,6 +1460,8 @@ def fork(sid, at, leaf=None, sub=None, root=None, request_id=None) -> dict:
     if last_ua is None:
         raise ConvoChainError("分叉出的链里没有任何用户或助手消息,Claude Code 恢复不了它", "empty_fork")
     warnings = list(notes)
+    if relinked:
+        warnings.append(f"{relinked} 行的原父节点不在这条链上,已接到上一行")
     if ix.replacements:
         merged, badr = [], 0
         with _open_bin(ix.path, ix.gz) as fh:
@@ -1456,7 +1485,7 @@ def fork(sid, at, leaf=None, sub=None, root=None, request_id=None) -> dict:
                         "sessionId": new}))
     if E[atk]["t"] not in ("user", "assistant"):
         warnings.append("分叉点不是用户或助手消息,恢复时会停在它之前最近的那一条")
-    if endb is None and emitted_bytes > BIG_FORK_BYTES:
+    if not full and endb is None and emitted_bytes > BIG_FORK_BYTES:
         warnings.append(f"分叉里没有压缩边界而且有 {emitted_bytes // 1024} KB,"
                         "大概率超出模型上下文")
     d = loc["main"].parent

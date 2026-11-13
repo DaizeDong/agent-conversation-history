@@ -4,7 +4,9 @@
     convo-chain node   SID UUID [--sub AGENT]
     convo-chain export SID --to U [--from U] [--leaf U] [--sub AGENT] [--tools] [--thinking]
                            [--out FILE]
-    convo-chain fork   SID AT [--leaf U]
+    convo-chain fork   SID AT [--leaf U] [--partial]
+    convo-chain inline [SID | --all] [--sessions-dir DIR]
+    convo-chain serve  [--host H] [--port N] [--sessions-dir DIR] [--export-dir DIR]
 
 Every subcommand takes `--root DIR` (the directory holding one folder per project, each with
 `<session-id>.jsonl` files). Without it the CLI falls back to the `CONVO_CHAIN_ROOT` environment
@@ -36,6 +38,7 @@ from pathlib import Path
 
 from . import __version__
 from .core import _enclosing_worktree, chain, export_md, fork, node
+from .lineage import export_full
 from .errors import ConvoChainError
 
 ENV_ROOT = "CONVO_CHAIN_ROOT"
@@ -111,6 +114,8 @@ def _parser() -> argparse.ArgumentParser:
     x.add_argument("--sub")
     x.add_argument("--tools", action="store_true", help="include tool calls and results")
     x.add_argument("--thinking", action="store_true", help="include thinking blocks")
+    x.add_argument("--this-file-only", action="store_true",
+                   help="do not prepend the parent session's history before the fork point")
     x.add_argument("--out", help="write the Markdown here (exclusive create) instead of "
                                  "returning it inside the JSON")
 
@@ -118,7 +123,50 @@ def _parser() -> argparse.ArgumentParser:
     f.add_argument("sid")
     f.add_argument("at")
     f.add_argument("--leaf")
+    f.add_argument("--partial", action="store_true",
+                   help="copy only what the model saw after the last compaction (old behaviour)")
+
+    i = sp.add_parser("inline", parents=[common],
+                      help="write a forked session's missing earlier history into its own file")
+    i.add_argument("sid", nargs="?")
+    i.add_argument("--all", action="store_true", help="every session that needs it")
+    i.add_argument("--sessions-dir", help="Claude Code's live session registry (default ~/.claude/sessions); "
+                                          "open sessions are skipped")
+
+    w = sp.add_parser("serve", parents=[common], help="local web UI to browse, export, fork and tidy sessions")
+    w.add_argument("--host", default="127.0.0.1")
+    w.add_argument("--port", type=int, default=8765)
+    w.add_argument("--sessions-dir", help="Claude Code's live session registry (default ~/.claude/sessions)")
+    w.add_argument("--export-dir", help="where 'save on server' writes; strftime codes allowed "
+                                        "(default ~/convo-chain-exports)")
+    w.add_argument("--allowed-host", action="append", default=[],
+                   help="extra Host header to accept (repeatable); loopback names are always accepted")
+    w.add_argument("--allow-remote", action="store_true",
+                   help="bind a non-loopback address; there is no login, put an authenticating proxy in front")
+    w.add_argument("--log-header", help="request header whose value is logged for write operations")
     return ap
+
+
+def _inline(args, root):
+    from .lineage import dependents_of_all, inline_ancestors
+    from .web import App
+    app = App(root or "", args.sessions_dir or str(Path.home() / ".claude" / "sessions"), "")
+    live = app.active_sessions()
+    if args.all == bool(args.sid):
+        raise ConvoChainError("give exactly one of SID or --all", "bad_args")
+    todo = dependents_of_all(root) if args.all else [args.sid]
+    done, skipped = [], []
+    for sid in todo:
+        try:
+            r = inline_ancestors(sid, root=root, is_live=lambda s: s in live)
+        except ConvoChainError as e:
+            if not args.all:
+                raise
+            skipped.append({"id": sid, "code": e.code})
+            continue
+        if not r.get("unchanged"):
+            done.append(r)
+    return {"inlined": done, "skipped": skipped}
 
 
 def main(argv=None) -> int:
@@ -132,13 +180,24 @@ def main(argv=None) -> int:
         elif args.cmd == "node":
             res = node(args.sid, args.uuid, sub=args.sub, root=root)
         elif args.cmd == "export":
-            res = export_md(args.sid, args.to, frm=args.frm, leaf=args.leaf, sub=args.sub,
-                            include_tools=args.tools, include_thinking=args.thinking, root=root)
+            if args.this_file_only or args.leaf or args.sub:
+                res = export_md(args.sid, args.to, frm=args.frm, leaf=args.leaf, sub=args.sub,
+                                include_tools=args.tools, include_thinking=args.thinking, root=root)
+            else:
+                res = export_full(args.sid, to=args.to, frm=args.frm, include_tools=args.tools,
+                                  include_thinking=args.thinking, root=root)
             if args.out:
                 res = dict(res)
                 res["out"] = _write_out(args.out, res.pop("text"))
+        elif args.cmd == "inline":
+            res = _inline(args, root)
+        elif args.cmd == "serve":
+            from .web import serve
+            return serve(root or str(Path.home() / ".claude" / "projects"), args.host, args.port,
+                         args.sessions_dir, args.export_dir, args.allowed_host,
+                         args.allow_remote, args.log_header)
         else:
-            res = fork(args.sid, args.at, leaf=args.leaf, root=root)
+            res = fork(args.sid, args.at, leaf=args.leaf, root=root, full=not args.partial)
     except ConvoChainError as e:
         return _refused(e)
     except Exception as e:  # noqa: BLE001  the contract promises JSON on stdout for every outcome

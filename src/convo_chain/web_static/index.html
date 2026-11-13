@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>会话控制台</title>
+<style>
+:root{
+  --bg:#0f1115; --panel:#161920; --panel2:#1d212b; --line:#272c38;
+  --fg:#e6e8ee; --dim:#9aa3b2; --faint:#6b7382;
+  --accent:#6ea8fe; --good:#5bd6a0; --warn:#f0b65b; --bad:#f07a7a;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg); color:var(--fg);
+  font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"PingFang SC","Microsoft YaHei",sans-serif;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+button{font:inherit; color:inherit; background:var(--panel2); border:1px solid var(--line);
+  border-radius:6px; padding:5px 11px; cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:disabled{opacity:.4; cursor:not-allowed; border-color:var(--line)}
+button.primary{background:var(--accent); color:#0b1020; border-color:var(--accent); font-weight:600}
+button.danger:hover{border-color:var(--bad); color:var(--bad)}
+input,select,textarea{font:inherit; color:inherit; background:var(--bg);
+  border:1px solid var(--line); border-radius:6px; padding:6px 9px; width:100%}
+input:focus,textarea:focus{outline:none; border-color:var(--accent)}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px}
+
+header{display:flex; align-items:center; gap:14px; padding:10px 16px;
+  border-bottom:1px solid var(--line); background:var(--panel); flex:none}
+header h1{font-size:15px; margin:0; font-weight:600; letter-spacing:.3px}
+header .sp{flex:1}
+header .stat{color:var(--faint); font-size:12px}
+
+main{flex:1; display:flex; min-height:0}
+.col{display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--line)}
+#projects{width:230px; background:var(--panel)}
+#sessions{width:330px; background:var(--panel)}
+#detail{flex:1; background:var(--bg); border-right:none; min-width:0}
+.colhead{padding:8px 12px; border-bottom:1px solid var(--line); flex:none;
+  font-size:11px; letter-spacing:.8px; text-transform:uppercase; color:var(--faint)}
+.colhead input{margin-top:6px; padding:4px 8px; font-size:13px}
+.scroll{overflow-y:auto; flex:1; min-height:0}
+
+.row{padding:8px 12px; border-bottom:1px solid var(--line); cursor:pointer}
+.row:hover{background:var(--panel2)}
+.row.on{background:var(--panel2); box-shadow:inset 3px 0 0 var(--accent)}
+.row .t{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.row .m{color:var(--faint); font-size:11.5px; margin-top:2px;
+  display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+.pin{color:var(--warn)}
+.livedot{color:var(--good); font-size:10px}
+.livedot.idle{color:var(--warn)}
+.idletag{color:var(--warn); font-size:11px}
+
+#detail .pad{padding:16px 20px}
+.sesshead{padding:12px 20px; border-bottom:1px solid var(--line); background:var(--panel)}
+.sesshead h2{margin:0 0 4px; font-size:15px; font-weight:600}
+.meta{color:var(--faint); font-size:12px; display:flex; gap:14px; flex-wrap:wrap}
+.meta b{color:var(--dim); font-weight:500}
+.acts{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap}
+
+.turn{border:1px solid var(--line); border-radius:8px; margin-bottom:12px; background:var(--panel)}
+.turn > .hd{padding:10px 13px; cursor:pointer; display:flex; gap:10px; align-items:flex-start}
+.turn > .hd:hover{background:var(--panel2)}
+.turn .idx{color:var(--faint); font-size:11px; min-width:26px; padding-top:2px}
+.turn .txt{flex:1; min-width:0}
+.turn .q{overflow:hidden; text-overflow:ellipsis; display:-webkit-box;
+  -webkit-line-clamp:2; -webkit-box-orient:vertical}
+.turn .a{color:var(--dim); font-size:12.5px; margin-top:5px; overflow:hidden;
+  text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical}
+.turn .cnt{color:var(--faint); font-size:11px; margin-top:6px; display:flex; gap:9px; flex-wrap:wrap}
+.turn .body{border-top:1px solid var(--line); padding:6px 0; display:none}
+.turn.open .body{display:block}
+.step{padding:5px 13px 5px 42px; cursor:pointer; display:flex; gap:9px; font-size:12.5px}
+.step:hover{background:var(--panel2)}
+.step .k{min-width:68px; color:var(--faint); font-size:11px; padding-top:2px}
+.step .p{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim)}
+.step.open .p{white-space:normal}
+.k-human{color:var(--accent)!important}
+.k-text{color:var(--good)!important}
+.k-tool{color:var(--warn)!important}
+.k-thinking{color:#b89ae8!important}
+.nodebox{margin:6px 13px 10px 42px; border:1px solid var(--line); border-radius:6px;
+  background:var(--bg); padding:10px 12px}
+.nodebox pre{margin:0; white-space:pre-wrap; word-break:break-word; max-height:460px;
+  overflow:auto; color:var(--fg)}
+.nodebox .lbl{color:var(--faint); font-size:11px; margin:8px 0 3px; letter-spacing:.5px}
+.nodebox .lbl:first-child{margin-top:0}
+
+.marker{display:flex; gap:12px; align-items:center; margin:0 0 12px; padding:7px 13px;
+  border:1px dashed var(--line); border-radius:8px; color:var(--faint); font-size:12px}
+.marker span:first-child{color:var(--warn)}
+.empty{color:var(--faint); padding:40px 20px; text-align:center}
+.err{color:var(--bad); padding:10px 20px; font-size:13px}
+
+dialog{background:var(--panel); color:var(--fg); border:1px solid var(--line);
+  border-radius:10px; padding:0; max-width:520px; width:92vw}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+dialog .dh{padding:13px 18px; border-bottom:1px solid var(--line); font-weight:600}
+dialog .db{padding:16px 18px}
+dialog .df{padding:12px 18px; border-top:1px solid var(--line);
+  display:flex; gap:9px; justify-content:flex-end}
+dialog label{display:block; margin-bottom:12px; font-size:13px; color:var(--dim)}
+dialog label input[type=checkbox]{width:auto; margin-right:7px}
+dialog .hint{color:var(--faint); font-size:12px; margin-top:8px; line-height:1.5}
+#toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+  background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+  padding:10px 16px; font-size:13px; display:none; max-width:70vw; z-index:9}
+#toast.bad{border-color:var(--bad); color:var(--bad)}
+#toast.good{border-color:var(--good)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>会话控制台</h1>
+  <span class="stat" id="hstat">载入中</span>
+  <span class="sp"></span>
+  <button id="btrash">回收站 <span id="tcount"></span></button>
+  <button id="brefresh">刷新</button>
+</header>
+
+<main>
+  <div class="col" id="projects">
+    <div class="colhead">项目<input id="pq" placeholder="过滤项目"></div>
+    <div class="scroll" id="plist"></div>
+  </div>
+  <div class="col" id="sessions">
+    <div class="colhead">会话<input id="sq" placeholder="过滤标题或 id"></div>
+    <div class="scroll" id="slist"><div class="empty">先选左边一个项目</div></div>
+  </div>
+  <div class="col" id="detail">
+    <div class="scroll" id="dwrap"><div class="empty">选一个会话看内容</div></div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<dialog id="dlg">
+  <div class="dh" id="dlgh"></div>
+  <div class="db" id="dlgb"></div>
+  <div class="df" id="dlgf"></div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const state = { health: {}, projects: [], project: null, sessions: [], sid: null, chain: null, view: 'sessions' };
+
+function mb(n){ return n >= 1048576 ? (n/1048576).toFixed(1)+'M' : Math.max(1,Math.round(n/1024))+'K'; }
+function when(ts){
+  const d = new Date(ts*1000), now = new Date();
+  const p = n => String(n).padStart(2,'0');
+  const same = d.getFullYear() === now.getFullYear();
+  return (same ? '' : d.getFullYear()+'-') + p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+/* 占用点:开着的窗口按最后一条真实对话分档,空闲超过 1 小时变黄并写出多久 */
+function idleText(la){
+  if(!la) return '';
+  const h = (Date.now()/1000 - la) / 3600;
+  if(h < 1) return '';
+  return h < 24 ? '空闲 ' + Math.floor(h) + ' 小时' : '空闲 ' + Math.floor(h/24) + ' 天';
+}
+function liveMark(s){
+  if(!s.live) return '';
+  const t = idleText(s.lastActive);
+  return t ? `<span class="livedot idle" title="窗口开着但已空闲">●</span> <span class="idletag">${t}</span> `
+           : '<span class="livedot" title="窗口开着,最近有对话">●</span> ';
+}
+function stamp(iso){
+  if(!iso) return '';
+  const d = new Date(iso), p = n => String(n).padStart(2,'0');
+  return p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+}
+let toastTimer;
+function toast(msg, kind){
+  const t = $('#toast');
+  t.textContent = msg; t.className = kind || ''; t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.style.display = 'none', kind === 'bad' ? 7000 : 3800);
+}
+async function api(path, opts){
+  if(opts && opts.method === 'POST'){      // 服务端写操作只收 JSON
+    opts = {...opts, headers: {'content-type': 'application/json', ...(opts.headers || {})},
+            body: opts.body ?? '{}'};
+  }
+  const r = await fetch(path, opts);
+  const ct = r.headers.get('content-type') || '';
+  if(!r.ok){
+    let msg = r.status + ' ' + r.statusText;
+    if(ct.includes('json')){
+      const j = await r.json().catch(() => null);
+      const d = j && j.detail;
+      if(d) msg = typeof d === 'string' ? d : (d.message || JSON.stringify(d));
+    }
+    throw new Error(msg);
+  }
+  return ct.includes('json') ? r.json() : r.text();
+}
+
+/* ---------------------------------------------------------------- 项目 */
+async function loadProjects(){
+  const d = await api('/api/projects');
+  state.projects = d.projects;
+  $('#tcount').textContent = d.trashCount ? '(' + d.trashCount + ')' : '';
+  drawProjects();
+}
+function drawProjects(){
+  const q = $('#pq').value.trim().toLowerCase();
+  const rows = state.projects.filter(p => !q || p.name.toLowerCase().includes(q));
+  $('#plist').innerHTML = rows.map(p => `
+    <div class="row ${p.name === state.project ? 'on' : ''}" data-p="${esc(p.name)}">
+      <div class="t">${esc(p.name)}</div>
+      <div class="m"><span>${p.sessions} 个会话</span><span>${mb(p.bytes)}</span><span>${when(p.mtime)}</span></div>
+    </div>`).join('') || '<div class="empty">没有匹配的项目</div>';
+}
+
+/* ---------------------------------------------------------------- 会话列表 */
+async function loadSessions(name){
+  state.project = name; state.view = 'sessions';
+  drawProjects();
+  $('#slist').innerHTML = '<div class="empty">载入中</div>';
+  const d = await api('/api/sessions?project=' + encodeURIComponent(name));
+  state.sessions = d.sessions;
+  drawSessions();
+}
+function drawSessions(){
+  const q = $('#sq').value.trim().toLowerCase();
+  const rows = state.sessions.filter(s =>
+    !q || s.title.toLowerCase().includes(q) || s.id.toLowerCase().includes(q));
+  $('#slist').innerHTML = rows.map(s => `
+    <div class="row ${s.id === state.sid ? 'on' : ''}" data-s="${esc(s.id)}">
+      <div class="t">${s.renamed ? '<span class="pin">◆</span> ' : ''}${
+        liveMark(s)}${esc(s.title)}</div>
+      <div class="m"><span>${esc(s.id.slice(0,8))}</span><span>${mb(s.bytes)}</span><span>${when(s.mtime)}</span>${
+        s.origin ? '<span>来自 ' + esc(s.origin) + '</span>' : ''}</div>
+    </div>`).join('') || '<div class="empty">没有匹配的会话</div>';
+}
+
+/* ---------------------------------------------------------------- 回收站 */
+async function loadTrash(){
+  state.view = 'trash'; state.project = null; state.sid = null;
+  drawProjects();
+  const d = await api('/api/trash');
+  state.sessions = d.sessions;
+  $('#sq').value = '';
+  drawSessions();
+  $('#dwrap').innerHTML = state.sessions.length
+    ? '<div class="empty">回收站里有 ' + state.sessions.length + ' 个会话,选一个可以恢复</div>'
+    : '<div class="empty">回收站是空的</div>';
+}
+
+/* ---------------------------------------------------------------- 会话详情 */
+async function loadChain(sid){
+  state.sid = sid;
+  drawSessions();
+  $('#dwrap').innerHTML = '<div class="empty">载入中</div>';
+  let c;
+  try{ c = await api('/api/chain/' + sid); }
+  catch(e){ $('#dwrap').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; return; }
+  if(c.available === false){
+    $('#dwrap').innerHTML = '<div class="err">会话不可读:' + esc(c.reason) + '</div>'; return;
+  }
+  state.chain = c;
+  drawChain();
+}
+function drawChain(){
+  const c = state.chain, inTrash = state.view === 'trash';
+  const warn = [];
+  if(c.compactions) warn.push(c.compactions + ' 次上下文压缩已接回');
+  if(c.forks) warn.push(c.forks + ' 处分叉');
+  if(c.badLines) warn.push(c.badLines + ' 行坏数据');
+  if(c.incompleteTail) warn.push('尾部未写完');
+  const acts = inTrash
+    ? `<button class="primary" data-act="restore">恢复到 ${esc(state.sessions.find(s=>s.id===c.id)?.origin || '原项目')}</button>`
+    : `<button class="primary" data-act="export">导出 Markdown</button>
+       <button data-act="rename">重命名</button>
+       <button data-act="fork">分叉</button>
+       ${c.missingAncestors && !c.live ? '<button data-act="inline">补全前史</button>' : ''}
+       <button class="danger" data-act="trash">删除到回收站</button>`;
+  $('#dwrap').innerHTML = `
+    <div class="sesshead">
+      <h2>${liveMark(c)}${esc(c.title)}</h2>
+      <div class="meta">
+        <span><b>${esc(c.id)}</b></span>
+        <span>${c.turns.filter(t => t.type !== 'marker').length} 轮 / ${c.pathLen} 节点</span>
+        <span>${mb(c.bytes)}</span>
+        <span>索引 ${c.indexMs}ms</span>
+        <span>${esc(c.cwd || '')}</span>
+      </div>
+      ${warn.length ? '<div class="meta" style="margin-top:4px;color:var(--warn)"><span>' + esc(warn.join(' · ')) + '</span></div>' : ''}
+      ${c.missingAncestors ? '<div class="meta" style="margin-top:4px;color:var(--warn)"><span>这个会话是从 ' + esc(c.missingAncestors.parent.slice(0,8)) + ' 分叉出来的,分叉点之前的 ' + c.missingAncestors.nodes + ' 个节点只在父会话里。导出会自动接上;点「补全前史」写进本文件后,父会话就可以删' + (c.live ? '(窗口关掉后才能补全)' : '') + '</span></div>' : ''}
+      ${c.live ? '<div class="meta" style="margin-top:4px;color:var(--good)"><span>这个会话正开着${idleText(c.lastActive) ? '(最后一条对话在 ' + stamp(new Date(c.lastActive*1000).toISOString()) + ',' + idleText(c.lastActive) + ';窗口没关,所以仍占用)' : ''},写操作会被挡下</span></div>' : ''}
+      <div class="acts">${acts}</div>
+    </div>
+    <div class="pad" id="turns">${(() => {
+      let n = 0;
+      return c.turns.map((t, i) =>
+        t.type === 'marker' ? drawMarker(t) : drawTurn(t, i, ++n)).join('');
+    })()}</div>`;
+}
+function drawMarker(m){
+  const kind = m.kind === 'compact' ? '上下文压缩' : esc(m.kind || '标记');
+  return `<div class="marker"><span>${kind}</span><span>${esc(m.preview || '')}</span>
+    <span>${stamp(m.ts)}</span></div>`;
+}
+function drawTurn(t, idx, num){
+  const c = t.counts || {};
+  const bits = ['tool','thinking','text','attachment','result']
+    .filter(k => c[k]).map(k => k + ' ' + c[k]);
+  return `
+    <div class="turn" data-k="${idx}">
+      <div class="hd">
+        <div class="idx">#${num}</div>
+        <div class="txt">
+          <div class="q">${esc(t.human ? t.human.preview : '(无用户消息)')}</div>
+          ${t.reply ? '<div class="a">' + esc(t.reply.preview) + '</div>' : ''}
+          <div class="cnt"><span>${stamp(t.ts)}</span><span>${t.stepCount ?? (t.steps || []).length} 步</span>${
+            bits.map(b => '<span>' + esc(b) + '</span>').join('')}</div>
+        </div>
+      </div>
+      <div class="body"></div>
+    </div>`;
+}
+function drawStep(s){
+  return `<div class="step" data-u="${esc(s.u)}">
+    <div class="k k-${esc(s.kind)}">${esc(s.kind)}</div>
+    <div class="p">${esc(s.preview || '')}</div>
+  </div>`;
+}
+async function openTurn(turn){
+  const body = turn.querySelector('.body');
+  turn.classList.toggle('open');
+  if(body.dataset.filled || !turn.classList.contains('open')) return;
+  body.dataset.filled = '1';
+  body.innerHTML = '<div class="step"><div class="k">…</div><div class="p">载入中</div></div>';
+  try{
+    const d = await api('/api/steps/' + state.sid + '/' + turn.dataset.k);
+    body.innerHTML = d.steps.map(drawStep).join('') || '<div class="step">(没有步骤)</div>';
+  }catch(e){
+    body.dataset.filled = '';
+    body.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+  }
+}
+
+async function openNode(stepEl, uuid){
+  const next = stepEl.nextElementSibling;
+  if(next && next.classList.contains('nodebox')){
+    next.remove(); stepEl.classList.remove('open'); return;
+  }
+  stepEl.classList.add('open');
+  const box = document.createElement('div');
+  box.className = 'nodebox';
+  box.innerHTML = '<div class="lbl">载入中</div>';
+  stepEl.after(box);
+  let n;
+  try{ n = await api('/api/node/' + state.sid + '/' + uuid); }
+  catch(e){ box.innerHTML = '<div class="err">' + esc(e.message) + '</div>'; return; }
+  const parts = [];
+  const add = (label, text) => parts.push(
+    '<div class="lbl">' + esc(label) + '</div><pre>' + esc(text) + '</pre>');
+  if(n.text) add('正文', n.text);
+  if(n.thinking) add('思考', n.thinking);
+  (n.tools || []).forEach(t => add('工具调用 ' + t.name, t.input));
+  (n.results || []).forEach(r => add(r.isError ? '工具结果(报错)' : '工具结果', r.text));
+  if(n.attachment) add('附件 ' + (n.attachment.type || ''), n.attachment.summary || '');
+  if(n.systemContent) add('系统', n.systemContent);
+  if(!parts.length) add('原始记录', n.raw || '(空)');
+  parts.push('<div class="lbl">节点 ' + esc(n.u) + ' · 行 ' + n.lineIndex +
+    (n.model ? ' · ' + esc(n.model) : '') + (n.truncated ? ' · 内容已截断' : '') + '</div>');
+  box.innerHTML = parts.join('');
+}
+
+/* ---------------------------------------------------------------- 弹窗 */
+function dialog(title, bodyHtml, buttons){
+  $('#dlgh').textContent = title;
+  $('#dlgb').innerHTML = bodyHtml;
+  $('#dlgf').innerHTML = '';
+  buttons.forEach(b => {
+    const el = document.createElement('button');
+    el.textContent = b.label;
+    if(b.cls) el.className = b.cls;
+    el.onclick = () => b.run ? b.run() : $('#dlg').close();
+    $('#dlgf').append(el);
+  });
+  $('#dlg').showModal();
+}
+
+function turnOptions(c){
+  let n = 0;
+  return c.turns.filter(t => t.type !== 'marker').map(t => {
+    n++;
+    const u = t.reply ? t.reply.u : t.u;
+    const label = (t.human ? t.human.preview : '').slice(0, 54) || '(无用户消息)';
+    return `<option value="${esc(u)}">#${n} ${esc(label)}</option>`;
+  }).join('');
+}
+
+function dlgExport(){
+  const c = state.chain;
+  const opts = turnOptions(c);
+  dialog('导出 ' + c.title, `
+    <label>导出到哪一轮为止
+      <select id="xto"><option value="${esc(c.leaf)}">全部(到最后)</option>${opts}</select></label>
+    <label><input type="checkbox" id="xtools" checked>带上工具调用</label>
+    <label><input type="checkbox" id="xthink" checked>带上思考过程</label>
+    <div class="hint">分叉出来的会话会自动接上父会话在分叉点之前的内容。下载是浏览器直接存文件。存到服务器会写进
+      ${esc(state.health.exportDir || '服务端的导出目录')},权限 0600。</div>`,
+    [{label:'取消'},
+     {label:'存到服务器', run: async () => {
+       try{
+         const r = await api('/api/export/' + c.id, {method:'POST',
+           headers:{'content-type':'application/json'},
+           body: JSON.stringify({to: $('#xto').value, tools: $('#xtools').checked,
+                                 thinking: $('#xthink').checked, save: true})});
+         $('#dlg').close();
+         toast('已存 ' + r.nodes + ' 个节点到 ' + r.saved, 'good');
+       }catch(e){ toast(e.message, 'bad'); }
+     }},
+     {label:'下载', cls:'primary', run: () => {
+       const q = new URLSearchParams({to: $('#xto').value,
+         tools: $('#xtools').checked, thinking: $('#xthink').checked});
+       window.location = '/api/export/' + c.id + '/download?' + q;
+       $('#dlg').close();
+     }}]);
+}
+
+function dlgRename(){
+  const c = state.chain;
+  dialog('重命名会话', `<label>新标题<input id="rt" maxlength="200" value="${esc(c.title)}"></label>
+    <div class="hint">会往会话文件追加一条原生 custom-title 记录,等同在 Claude Code 里 /rename。</div>`,
+    [{label:'取消'}, {label:'保存', cls:'primary', run: async () => {
+      try{
+        await api('/api/rename/' + c.id, {method:'POST',
+          headers:{'content-type':'application/json'},
+          body: JSON.stringify({title: $('#rt').value})});
+        $('#dlg').close(); toast('已重命名', 'good');
+        await loadSessions(state.project); await loadChain(c.id);
+      }catch(e){ toast(e.message, 'bad'); }
+    }}]);
+  setTimeout(() => $('#rt').select(), 30);
+}
+
+function dlgFork(){
+  const c = state.chain;
+  const opts = turnOptions(c);
+  dialog('从某一轮分叉出新会话', `
+    <label>分叉点<select id="fat">${opts}</select></label>
+    <div class="hint">会在同一个项目目录里新建一个会话文件,原会话一个字节都不动。
+      新会话整段复制到分叉点,自带全部历史(经过的压缩点都保留),父会话以后删掉也不影响它。
+      完成后给你 claude --resume 命令。</div>`,
+    [{label:'取消'}, {label:'分叉', cls:'primary', run: async () => {
+      try{
+        const r = await api('/api/fork/' + c.id, {method:'POST',
+          headers:{'content-type':'application/json'},
+          body: JSON.stringify({at: $('#fat').value})});
+        $('#dlg').close();
+        dialog('分叉完成', `<div class="hint">新会话 ${esc(r.newId)}</div>
+          <pre style="margin-top:10px;white-space:pre-wrap;word-break:break-all">${esc(r.command)}</pre>`,
+          [{label:'知道了'}]);
+        await loadSessions(state.project);
+      }catch(e){ toast(e.message, 'bad'); }
+    }}]);
+}
+
+function dlgInline(){
+  const c = state.chain;
+  dialog('补全前史', `
+    <div>把 <b>${esc(c.title)}</b> 缺的 ${c.missingAncestors.nodes} 个节点从父会话
+      ${esc(c.missingAncestors.parent.slice(0,8))} 写进它自己的文件吗?</div>
+    <div class="hint">只在文件开头插入,原来的内容一个字节不改,修改时间也保持不变。
+      写完后这个会话自带全部历史,父会话可以随意删除。</div>`,
+    [{label:'取消'}, {label:'补全', cls:'primary', run: async () => {
+      try{
+        const r = await api('/api/inline/' + c.id, {method:'POST'});
+        $('#dlg').close();
+        toast(r.unchanged ? '本来就是完整的' : '已补进 ' + r.inlined + ' 行', 'good');
+        await loadChain(c.id);
+      }catch(e){ toast(e.message, 'bad'); }
+    }}]);
+}
+
+function dlgTrash(){
+  const c = state.chain;
+  dialog('删除到回收站', `
+    <div>要把 <b>${esc(c.title)}</b> 移到回收站吗?</div>
+    <div class="hint">不是真删。会话连同它的 sidecar 目录一起 move 到回收站项目,
+      原项目记在清单里,随时能一键恢复。
+      如果别的会话的前史只在这个会话里,会先把前史写进它们自己的文件。${mb(c.bytes)} / ${c.pathLen} 个节点。</div>`,
+    [{label:'取消'}, {label:'移到回收站', cls:'danger', run: async () => {
+      try{
+        await api('/api/trash/' + c.id, {method:'POST'});
+        $('#dlg').close(); toast('已移到回收站', 'good');
+        state.sid = null; state.chain = null;
+        $('#dwrap').innerHTML = '<div class="empty">已移到回收站</div>';
+        await loadSessions(state.project); await loadProjects();
+      }catch(e){ toast(e.message, 'bad'); }
+    }}]);
+}
+
+async function doRestore(){
+  const c = state.chain;
+  try{
+    const r = await api('/api/trash/' + c.id + '/restore', {method:'POST'});
+    toast('已恢复到 ' + (r.project || r.projectDir || '原项目'), 'good');
+    state.sid = null; state.chain = null;
+    await loadTrash(); await loadProjects();
+  }catch(e){ toast(e.message, 'bad'); }
+}
+
+/* ---------------------------------------------------------------- 事件 */
+$('#plist').onclick = e => {
+  const row = e.target.closest('[data-p]');
+  if(row) loadSessions(row.dataset.p).catch(err => toast(err.message, 'bad'));
+};
+$('#slist').onclick = e => {
+  const row = e.target.closest('[data-s]');
+  if(row) loadChain(row.dataset.s);
+};
+$('#dwrap').onclick = e => {
+  const act = e.target.closest('[data-act]');
+  if(act){
+    const a = act.dataset.act;
+    if(a === 'export') dlgExport();
+    if(a === 'rename') dlgRename();
+    if(a === 'fork') dlgFork();
+    if(a === 'inline') dlgInline();
+    if(a === 'trash') dlgTrash();
+    if(a === 'restore') doRestore();
+    return;
+  }
+  const step = e.target.closest('.step');
+  if(step){ openNode(step, step.dataset.u); return; }
+  const hd = e.target.closest('.turn > .hd');
+  if(hd) openTurn(hd.parentElement);
+};
+$('#pq').oninput = drawProjects;
+$('#sq').oninput = drawSessions;
+$('#btrash').onclick = () => loadTrash().catch(e => toast(e.message, 'bad'));
+$('#brefresh').onclick = () => boot();
+
+async function boot(){
+  try{
+    const h = await api('/api/health');
+    state.health = h;
+    $('#hstat').textContent = 'convo-chain ' + h.version + ' · ' + h.live + ' 个会话正开着';
+    await loadProjects();
+    if(state.view === 'trash') await loadTrash();
+    else if(state.project) await loadSessions(state.project);
+  }catch(e){ $('#hstat').textContent = '后端连不上'; toast(e.message, 'bad'); }
+}
+boot();
+</script>
+</body>
+</html>

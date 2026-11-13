@@ -1,6 +1,6 @@
 # convo-chain
 
-Reconstruct a Claude Code conversation from its transcript, export a selected range to Markdown, or fork the context at a selected node.
+Reconstruct a Claude Code conversation from its transcript, export it to Markdown, fork it at a selected node, or browse and tidy your sessions in a small built-in local web UI.
 
 [![Python Library](https://img.shields.io/badge/Python-Library%20%2B%20CLI-orange?style=flat)](src/convo_chain/__init__.py)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -16,7 +16,7 @@ Conversation reconstruction must account for three transcript structures observe
 
 1. **One assistant reply is split into one line per content block.** Parallel tool calls make a node look like it has two children (the next block of the same `message.id`, and the first block's tool result). That is one reply, not a branch. This library groups replies by `message.id` and pairs every `tool_use` with exactly one result.
 2. **A compaction boundary has `parentUuid: null`,** so a naive walk stops there and the whole history before it vanishes. Its `logicalParentUuid` often points at a line written after the boundary, so following it loops back. The predecessor is chosen by a three level rule, and the one level that is a guess is reported as a guess.
-3. **Preserved messages stay where they were written, before the boundary,** and only the boundary's `compactMetadata` links them into the new context. A fork relinks them the way Claude Code does at load time, so the forked file holds exactly the context the model saw at that node, nothing more.
+3. **Preserved messages stay where they were written, before the boundary,** and only the boundary's `compactMetadata` links them into the new context. A partial fork (`full=False`) relinks them the way Claude Code does at load time, so the forked file holds exactly the context the model saw at that node. The default fork instead keeps the whole history, every compaction boundary included.
 
 The caller passes an explicit session `root`; the library never guesses a default directory. Fork creates a new file exclusively. Rename and move are explicit metadata and file operations with recovery journals. Writes are refused inside git worktrees.
 
@@ -24,7 +24,7 @@ The caller passes an explicit session `root`; the library never guesses a defaul
 
 The dependency-free Python library and CLI index each transcript in one pass using byte offsets. Memory holds a compact record per line; full content is read on demand. This avoids loading a several-hundred-megabyte transcript in full for each browse operation. An in-process LRU cache holds three indexes, keyed by path, mtime and size.
 
-The engine operates on one session at a time; session listing and the user interface belong to the caller.
+The library operates on one session at a time. `convo-chain serve` adds a minimal web UI on top of it for listing, reading, exporting, forking and tidying sessions; a larger application can still embed the library and bring its own interface.
 
 ## Install
 
@@ -52,11 +52,13 @@ cc.shape(sid, leaf=leaf)                          # id shape gate, raises before
 r = cc.chain(sid, leaf=None, sub=None, root=root) # the display chain cut into turns, with forks
 n = cc.node(sid, uuid, sub=None, root=root)       # one node's full content, read back by offset
 md = cc.export_md(sid, to=uuid, frm=None, include_tools=False, include_thinking=False, root=root)
-f = cc.fork(sid, at=uuid, leaf=None, root=root)   # writes <newId>.jsonl next to the source
+f = cc.fork(sid, at=uuid, leaf=None, root=root)   # writes <newId>.jsonl next to the source, whole history
+md = cc.export_full(sid, to=uuid, root=root)      # export_md plus the parent session's earlier history
+cc.inline_ancestors(sid, root=root, is_live=None) # write that earlier history into the session's own file
 print(f["command"])                               # cd '<cwd>'; claude --resume <newId>
 ```
 
-Also exported: `rename(sid, title, root=...)`, `move(sid, target_project, root=...)`, `delete_plan`, `delete`, `project_info`, `recover_pending`, `locate`, `resume_command`, `clear_cache`, `CACHE_SLOTS`, and the transcript rules `typed_text(entry)` and `looks_injected(text)`.
+Also exported: `dependents(sid, root)`, `rename(sid, title, root=...)`, `move(sid, target_project, root=...)`, `delete_plan`, `delete`, `project_info`, `recover_pending`, `locate`, `resume_command`, `clear_cache`, `CACHE_SLOTS`, and the transcript rules `typed_text(entry)` and `looks_injected(text)`.
 
 Errors come in two kinds that do not inherit from each other. `ConvoChainError` is a refused request and carries a stable `.code` (`bad_id`, `bad_sub`, `bad_leaf`, `bad_uuid`, `not_found`, `ambiguous`, `outside_root`, `not_on_path`, `bad_range`, `stale_index`, `exists`, `inside_repo`, `unrelinkable`, `empty_fork`, `no_sub_fork`, `unavailable`, and a few more). `Unavailable` means no usable root: `chain` and `node` return `{"available": false, "reason": ...}` for it, while `export_md` and `fork` raise `ConvoChainError` with code `unavailable`.
 
@@ -67,13 +69,34 @@ convo-chain chain  SID [--leaf U] [--sub AGENT]                  [--root DIR]
 convo-chain node   SID UUID [--sub AGENT]                        [--root DIR]
 convo-chain export SID --to U [--from U] [--leaf U] [--sub AGENT]
                    [--tools] [--thinking] [--out FILE]           [--root DIR]
-convo-chain fork   SID AT [--leaf U]                             [--root DIR]
+convo-chain fork   SID AT [--leaf U] [--partial]                 [--root DIR]
+convo-chain inline [SID | --all] [--sessions-dir DIR]            [--root DIR]
+convo-chain serve  [--host H] [--port N] [--sessions-dir DIR] [--export-dir DIR]
+                   [--allowed-host H] [--allow-remote] [--log-header NAME] [--root DIR]
 convo-chain --version
 ```
 
 Exit codes: `0` success, `1` refused (`{"error": {"code", "message"}}` on stdout), `2` usage error, `3` not checked (no usable root), `4` internal failure (`{"error": {"code": "internal", "message": <exception class name>}}` on stdout, a bug or an unreadable file rather than a refusal). An explicit `--root`, even `--root ""`, is never replaced by `CONVO_CHAIN_ROOT`. `export --out` writes the Markdown to a file with exclusive create and refuses a target inside a git work tree, for the same reason `fork` does. `python -m convo_chain` works the same way.
 
 The CLI rebuilds the index on every call. A long lived caller should import the library so the cache survives between requests.
+
+## Forks and earlier history
+
+Claude Code writes a forked or resumed session in one of two shapes. Either the new file carries the whole history, or it starts at a compaction boundary and the history before that boundary lives only in the parent's file. In the second shape, deleting the parent silently deletes half of the child.
+
+`fork` now copies the whole display chain up to the fork point and keeps every compaction boundary it crosses, so a fork always carries its own history. `--partial` (`full=False`) gives the old behaviour, only what the model saw after the last compaction.
+
+For sessions that already have the second shape, the shared uuids identify the parent and the fork point. `export_full` (the CLI `export` default, `--this-file-only` turns it off) prepends the parent's earlier history to the export. `inline_ancestors` (CLI `inline`) writes that earlier history into the child's own file: it is inserted before the first chain line, every original byte and the modification time stay as they were, the new file is re-indexed and checked against the old leaf before an atomic replace, and an open session is refused because Claude Code holds an append handle on its file. After that the parent can be deleted. The inserted lines sit before a compaction boundary whose `parentUuid` is null, which is where Claude Code stops walking when it resumes.
+
+## Web UI
+
+```
+convo-chain serve --root ~/.claude/projects
+```
+
+Opens a dependency-free local server (default `127.0.0.1:8765`) with a project and session list, the turn by turn conversation, Markdown export (download or save on the server), rename, fork, a recycle bin with restore, and a marker for sessions that a running Claude Code still has open (green when recently active, amber with the idle time when the window is open but quiet). Deleting a session moves it to a recycle-bin project; if another session's earlier history lives only in it, that history is written into the other session first, and the deletion is refused while that other session is open.
+
+It has no login. It binds loopback only unless `--allow-remote` is given, accepts only loopback `Host` headers plus any `--allowed-host`, takes writes only as `application/json` with a matching `Origin`, and writes exports with mode 0600. Put an authenticating reverse proxy in front of it if you expose it. `--sessions-dir` points at Claude Code's live session registry (default `~/.claude/sessions`), `--export-dir` at the export folder (default `~/convo-chain-exports`, strftime codes such as `%Y-%m` allowed), and `--log-header` names a request header whose value is logged next to write operations.
 
 ## Where the data lives
 
@@ -100,7 +123,7 @@ files still need cleanup; retry the same request. These two operations are libra
 
 ## Limitations
 
-The index is per file. Resume commands use explicit project metadata or a recorded directory that
+The index is per file. Sidecar files of an ancestor (large tool results stored next to its transcript) are not copied when its history is inlined or forked. Resume commands use explicit project metadata or a recorded directory that
 matches the storage folder. Missing metadata is reported. Windows file transactions use Windows
 10 or newer rename semantics; other platforms need an atomic rename-without-replacement primitive.
 

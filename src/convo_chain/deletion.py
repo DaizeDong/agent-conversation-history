@@ -223,7 +223,7 @@ def delete(sid, *, root, expected_project, fingerprint, request_id):
                 for item in items:
                     source, target = base / item["source"], base / item["target"]
                     T.rename_no_replace(source, target)
-                    if T.checked_snapshot(target, stack) != item["snapshot"]:
+                    if T.snapshot(target) != item["snapshot"]:  # 同上:锁已持有,不能对同一 inode 再 flock
                         raise ConvoChainError("会话在删除过程中发生变化，已保留恢复记录", "recovery_conflict")
                 T.apply_indexes(base, changes)
                 data.update(kind="delete", status="committed")

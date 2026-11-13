@@ -253,7 +253,7 @@ def move(sid, target_project, *, root, expected_project=None):
                 for item in moves:
                     _rename_no_replace(base / item["source"], base / item["target"])
                     target = base / item["target"]
-                    if target.is_dir() and T.checked_snapshot(target, stack) != item["snapshot"]:
+                    if target.is_dir() and T.snapshot(target) != item["snapshot"]:  # 文件锁在改名前已由 stack 持有,同 inode 再抢一次必败
                         raise ConvoChainError("关联文件在迁移时发生变化，已保留恢复记录", "recovery_conflict")
                 T.apply_indexes(base, changes)
                 warnings = T.commit(pending, data)

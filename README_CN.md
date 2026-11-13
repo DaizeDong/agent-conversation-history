@@ -1,6 +1,6 @@
 # convo-chain
 
-从 Claude Code 转录重建对话，将选定范围导出为 Markdown，或从选定节点的上下文分叉出新会话。
+从 Claude Code 转录重建对话，导出为 Markdown，从选定节点分叉出新会话，或在内置的本地小网页里浏览和整理会话。
 
 [![Python Library](https://img.shields.io/badge/Python-Library%20%2B%20CLI-orange?style=flat)](src/convo_chain/__init__.py)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -16,7 +16,7 @@
 
 1. **一次助手回复按内容块拆成好几行。** 并行工具调用会让一个节点看上去有两个孩子(同一 `message.id` 的下一块,和第一块的工具结果)。那是一次回复,不是分支。这个库按 `message.id` 把回复归组,并给每个 `tool_use` 配上恰好一个结果。
 2. **压缩边界那一行的 `parentUuid` 是 null,** 朴素上溯走到这里就停了,前面整段历史不在链上。它的 `logicalParentUuid` 常常指向边界之后写下的行,照着走会绕回来。前驱按三级规则选,其中唯一靠猜的那一级会明说是猜的。
-3. **被保留的消息留在它们写下的原位,也就是边界之前,** 只由边界的 `compactMetadata` 把它们接进新上下文。分叉时照 Claude Code 加载时的方式重链,分叉出来的文件里恰好是模型在那个节点看到的上下文,一个节点都不多。
+3. **被保留的消息留在它们写下的原位,也就是边界之前,** 只由边界的 `compactMetadata` 把它们接进新上下文。部分分叉(`full=False`)照 Claude Code 加载时的方式重链,分叉出来的文件里恰好是模型在那个节点看到的上下文。默认的分叉则带上整段历史,经过的压缩边界都保留。
 
 会话根目录由调用方显式传入 `root`，库没有默认目录。分叉会独占创建新文件；重命名和迁移则通过带恢复记录的文件事务执行。写入位置位于 git 工作树内时会拒绝操作。
 
@@ -24,7 +24,7 @@
 
 零依赖 Python 库和 CLI 通过一次扫描建立字节偏移索引。内存中每行只保留紧凑记录，完整内容按需读取，避免每次浏览都完整加载数百 MB 的转录。进程内 LRU 缓存保留三份索引，以路径、mtime 和大小为键。
 
-这套引擎按单个会话工作；会话列表和用户界面由调用方负责。
+库按单个会话工作。`convo-chain serve` 在它之上提供一个最小的网页界面,用来列出、阅读、导出、分叉和整理会话;更大的应用仍可以导入库,自带界面。
 
 ## 安装
 
@@ -52,11 +52,13 @@ cc.shape(sid, leaf=leaf)                          # id 形状闸,在碰文件系
 r = cc.chain(sid, leaf=None, sub=None, root=root) # 按轮切好的显示链,带分叉
 n = cc.node(sid, uuid, sub=None, root=root)       # 一个节点的完整内容,按偏移读回
 md = cc.export_md(sid, to=uuid, frm=None, include_tools=False, include_thinking=False, root=root)
-f = cc.fork(sid, at=uuid, leaf=None, root=root)   # 在源文件旁边写一份 <newId>.jsonl
+f = cc.fork(sid, at=uuid, leaf=None, root=root)   # 在源文件旁边写一份 <newId>.jsonl,带整段历史
+md = cc.export_full(sid, to=uuid, root=root)      # export_md 外加父会话更早的历史
+cc.inline_ancestors(sid, root=root, is_live=None) # 把那段更早的历史写进会话自己的文件
 print(f["command"])                               # cd '<cwd>'; claude --resume <newId>
 ```
 
-另提供 `rename(sid, title, root=...)`、`move(sid, target_project, root=...)`、`delete_plan`、`delete`、`project_info`、`recover_pending`、`locate`、`resume_command`、`clear_cache`、`CACHE_SLOTS`，以及转录规则 `typed_text(entry)` 和 `looks_injected(text)`。
+另提供 `dependents(sid, root)`、`rename(sid, title, root=...)`、`move(sid, target_project, root=...)`、`delete_plan`、`delete`、`project_info`、`recover_pending`、`locate`、`resume_command`、`clear_cache`、`CACHE_SLOTS`，以及转录规则 `typed_text(entry)` 和 `looks_injected(text)`。
 
 错误分两种,互不继承。`ConvoChainError` 是请求被拒,带一个稳定的 `.code`(`bad_id`、`bad_sub`、`bad_leaf`、`bad_uuid`、`not_found`、`ambiguous`、`outside_root`、`not_on_path`、`bad_range`、`stale_index`、`exists`、`inside_repo`、`unrelinkable`、`empty_fork`、`no_sub_fork`、`unavailable` 等)。`Unavailable` 是没有可用的根目录:`chain` 和 `node` 遇到它返回 `{"available": false, "reason": ...}`,`export_md` 和 `fork` 则抛 code 为 `unavailable` 的 `ConvoChainError`。
 
@@ -67,13 +69,34 @@ convo-chain chain  SID [--leaf U] [--sub AGENT]                  [--root DIR]
 convo-chain node   SID UUID [--sub AGENT]                        [--root DIR]
 convo-chain export SID --to U [--from U] [--leaf U] [--sub AGENT]
                    [--tools] [--thinking] [--out FILE]           [--root DIR]
-convo-chain fork   SID AT [--leaf U]                             [--root DIR]
+convo-chain fork   SID AT [--leaf U] [--partial]                 [--root DIR]
+convo-chain inline [SID | --all] [--sessions-dir DIR]            [--root DIR]
+convo-chain serve  [--host H] [--port N] [--sessions-dir DIR] [--export-dir DIR]
+                   [--allowed-host H] [--allow-remote] [--log-header NAME] [--root DIR]
 convo-chain --version
 ```
 
 退出码:`0` 成功,`1` 被拒(stdout 上是 `{"error": {"code", "message"}}`),`2` 用法错误,`3` 未检查(没有可用的根目录),`4` 内部故障(stdout 上是 `{"error": {"code": "internal", "message": <异常类名>}}`,说明是程序缺陷或文件读不了,不是拒绝)。显式给了 `--root`,哪怕是 `--root ""`,也绝不会被 `CONVO_CHAIN_ROOT` 顶替。`export --out` 把 Markdown 独占创建写进文件,目标在 git 工作树里就拒绝,理由和 `fork` 一样。`python -m convo_chain` 用法相同。
 
 CLI 每次调用都重建索引。长期运行的调用方应该直接导入这个库,让缓存在请求之间留住。
+
+## 分叉与更早的历史
+
+Claude Code 写出的分叉或续写会话有两种形态:要么新文件带着全部历史,要么它从某个压缩边界开头,边界之前的历史只在父会话的文件里。第二种形态下,删掉父会话就等于悄悄删掉子会话的前半段。
+
+`fork` 现在把显示链整段复制到分叉点,经过的每个压缩边界都保留,分叉出来的会话自带历史。`--partial`(`full=False`)是老行为,只带最近一次压缩之后模型看到的部分。
+
+已经是第二种形态的会话,靠两份文件共有的 uuid 找到父会话和分叉点。`export_full`(CLI `export` 的默认,`--this-file-only` 关掉)导出时把父会话更早的历史接在前面。`inline_ancestors`(CLI `inline`)把这段历史写进子会话自己的文件:插在第一条链条目之前,原来的每个字节和修改时间都不变,新文件重新建索引并核对叶子没变后才原子替换,开着的会话一律拒绝,因为 Claude Code 持有那个文件的追加句柄。写完之后父会话就可以删。插入的行在一个 `parentUuid` 为 null 的压缩边界之前,Claude Code 恢复会话时上溯到那里就停。
+
+## 网页界面
+
+```
+convo-chain serve --root ~/.claude/projects
+```
+
+起一个零依赖的本地服务(默认 `127.0.0.1:8765`):项目和会话列表、按轮阅读、导出 Markdown(下载或存到服务器)、重命名、分叉、带恢复的回收站,以及 Claude Code 是否还开着这个会话的标记(最近有对话是绿色,窗口开着但没动静则是黄色并写出空闲多久)。删除会话是挪进回收站项目;如果别的会话的更早历史只在它里面,会先把那段历史写进那个会话,而那个会话开着时拒绝删除。
+
+它没有登录。默认只绑回环地址,除非给 `--allow-remote`;只接受回环 `Host` 头加上 `--allowed-host` 指定的;写操作只收 `application/json` 且 `Origin` 要和 `Host` 一致;导出文件权限 0600。要对外就放在你自己的认证反向代理后面。`--sessions-dir` 指向 Claude Code 的活跃会话登记目录(默认 `~/.claude/sessions`),`--export-dir` 是导出目录(默认 `~/convo-chain-exports`,可以写 `%Y-%m` 这类 strftime 代码),`--log-header` 指定一个请求头,其值会和写操作一起记进日志。
 
 ## 数据放在哪
 
@@ -97,7 +120,7 @@ CLI 每次调用都重建索引。长期运行的调用方应该直接导入这�
 
 ## 局限
 
-索引以文件为单位。恢复命令采用明确的项目元数据或与存储目录匹配的历史目录；信息缺失时会提示。
+索引以文件为单位。祖先会话的旁挂文件(存在转录旁边的大型工具结果)在补全或分叉时不会被复制。恢复命令采用明确的项目元数据或与存储目录匹配的历史目录；信息缺失时会提示。
 Windows 文件事务需要 Windows 10 或更新系统，其他平台需要支持原子且不覆盖目标的重命名操作。
 
 ## 语言

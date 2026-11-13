@@ -72,6 +72,17 @@ agent-conversation-history serve --root ~/.claude/projects
 
 它没有登录。默认只绑回环地址,除非给 `--allow-remote`;只接受回环 `Host` 头加上 `--allowed-host` 指定的;写操作只收 `application/json` 且 `Origin` 要和 `Host` 一致;导出文件权限 0600。要对外就放在你自己的认证反向代理后面。`--sessions-dir` 指向 Claude Code 的活跃会话登记目录(默认 `~/.claude/sessions`),`--export-dir` 是导出目录(默认 `~/agent-conversation-history-exports`,可以写 `%Y-%m` 这类 strftime 代码),`--log-header` 指定一个请求头,其值会和写操作一起记进日志。
 
+## 被其它项目调用
+
+别的程序可以把它当普通子进程用,不需要安装:检出(或作为 submodule 加进去),然后运行 `PYTHONPATH=<检出目录>/src python3 -m agent_conversation_history ...`。需要 Python 3.10 或更新,没有依赖。下面这些是稳定接口,改动其中任何一项都会在 CHANGELOG 里记为破坏性变更,并通知调用它的项目:
+
+- **可用性探测。** `--version` 退出码为 `0`,并打印 `agent-conversation-history <版本>`。调用方只想知道工具能不能用时,只看这个退出码。
+- **输出。** 除 `serve` 外的子命令成功时 stdout 上只有一个 JSON 对象。退出码:`0` 成功,`1` 被拒(`{"error": {"code", "message"}}`),`2` 用法错误,`3` 没有可用的根目录,`4` 内部故障。被拒的 `code` 取值是稳定的;调用方应该按 `not_on_path`、`no_parent`、`bad_uuid`、`unavailable` 分支,不要解析 message 文本。
+- **`fork SID AT`。** `AT` 是节点 uuid、`leaf`、`last-human`、`before-last-human` 或 `before:UUID`。选项:`--root DIR`、`--leaf U`、`--id UUID`(幂等:会话已存在就带 `reused: true` 返回已有结果,什么都不写)、`--title-suffix S`、`--partial`。结果字段:`newId`、`file`、`cwd`、`command`、`title`、`at`、`forkedFrom`(`sessionId`、`messageUuid`)、`reused`、`lines`、`emitted`、`leafUuid`、`warnings`。
+- **根目录。** `--root`,否则 `AGENT_CONVERSATION_HISTORY_ROOT`,否则 `$CLAUDE_CONFIG_DIR/projects`,否则 `~/.claude/projects`。Claude Code 用的配置目录不是默认值的调用方,请显式传 `--root`。
+
+分叉只会写一个新的会话文件,源会话和正在运行的 Claude Code 窗口都不动,所以调用方用返回的 `command` 去恢复这个分叉。
+
 ## 数据放在哪
 
 转录留在调用方传入的仓外根目录下。分叉是在源转录自己的项目目录里新建一份 `<uuid>.jsonl`。导出写到 `--out` 指定的地方,或者在内存里交还调用方。`.gitignore` 在全仓范围排除 `*.jsonl` 和 `*.jsonl.gz`。怎么核对的,写在 `.dataclass.json` 里。

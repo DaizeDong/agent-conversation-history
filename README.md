@@ -72,6 +72,17 @@ Opens a dependency-free local server (default `127.0.0.1:8765`) with a project a
 
 It has no login. It binds loopback only unless `--allow-remote` is given, accepts only loopback `Host` headers plus any `--allowed-host`, takes writes only as `application/json` with a matching `Origin`, and writes exports with mode 0600. Put an authenticating reverse proxy in front of it if you expose it. `--sessions-dir` points at Claude Code's live session registry (default `~/.claude/sessions`), `--export-dir` at the export folder (default `~/agent-conversation-history-exports`, strftime codes such as `%Y-%m` allowed), and `--log-header` names a request header whose value is logged next to write operations.
 
+## Called from other projects
+
+Another program can use this as a plain subprocess, with no install step: check out (or add as a submodule) and run `PYTHONPATH=<checkout>/src python3 -m agent_conversation_history ...`. Python 3.10 or newer, no dependencies. These parts are a stable interface, and a change to any of them is recorded in the CHANGELOG as a breaking change and announced to the projects that call it:
+
+- **Availability probe.** `--version` exits `0` and prints `agent-conversation-history <version>`. A caller that only needs to know whether the tool is usable should rely on that exit code and nothing else.
+- **Output.** Every subcommand except `serve` prints one JSON object to stdout and nothing else on success. Exit codes: `0` success, `1` refused (`{"error": {"code", "message"}}`), `2` usage error, `3` no usable root, `4` internal failure. The refusal `code` values are stable; a caller should branch on `not_on_path`, `no_parent`, `bad_uuid` and `unavailable` rather than on the message text.
+- **`fork SID AT`.** `AT` is a node uuid, `leaf`, `last-human`, `before-last-human` or `before:UUID`. Options: `--root DIR`, `--leaf U`, `--id UUID` (idempotent: an existing session is returned with `reused: true` and nothing is written), `--title-suffix S`, `--partial`. Result fields: `newId`, `file`, `cwd`, `command`, `title`, `at`, `forkedFrom` (`sessionId`, `messageUuid`), `reused`, `lines`, `emitted`, `leafUuid`, `warnings`.
+- **Root.** `--root`, else `AGENT_CONVERSATION_HISTORY_ROOT`, else `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`. A caller whose Claude Code uses a non-default config directory should pass `--root` explicitly.
+
+A fork only ever writes a new session file; the source session and any running Claude Code window are untouched, so the caller resumes the fork with the returned `command`.
+
 ## Where the data lives
 
 Transcripts stay under the caller-provided root, outside this repository. A fork is one new `<uuid>.jsonl` in the source transcript's own project directory. An export goes where `--out` says, or back to the caller in memory. `.gitignore` excludes `*.jsonl` and `*.jsonl.gz` everywhere. `.dataclass.json` records how that was checked.

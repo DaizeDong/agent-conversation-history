@@ -5,7 +5,7 @@
 *.jsonl
 *.jsonl.gz
 .fork-*.tmp
-.convo-chain-ops/
+.agent-conversation-history-ops/
 sessions-index.json
 exports/
 

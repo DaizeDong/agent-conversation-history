@@ -1,8 +1,8 @@
-# convo-chain
+# agent-conversation-history
 
 从 Claude Code 转录重建对话，导出为 Markdown，从选定节点分叉出新会话，或在内置的本地小网页里浏览和整理会话。
 
-[![Python Library](https://img.shields.io/badge/Python-Library%20%2B%20CLI-orange?style=flat)](src/convo_chain/__init__.py)
+[![Python Library](https://img.shields.io/badge/Python-Library%20%2B%20CLI-orange?style=flat)](src/agent_conversation_history/__init__.py)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-green?style=flat)](pyproject.toml)
 [![Languages](https://img.shields.io/badge/Languages-EN%20%2F%20CN-blue?style=flat)](#语言)
@@ -24,59 +24,33 @@
 
 零依赖 Python 库和 CLI 通过一次扫描建立字节偏移索引。内存中每行只保留紧凑记录，完整内容按需读取，避免每次浏览都完整加载数百 MB 的转录。进程内 LRU 缓存保留三份索引，以路径、mtime 和大小为键。
 
-库按单个会话工作。`convo-chain serve` 在它之上提供一个最小的网页界面,用来列出、阅读、导出、分叉和整理会话;更大的应用仍可以导入库,自带界面。
+库按单个会话工作。`agent-conversation-history serve` 在它之上提供一个最小的网页界面,用来列出、阅读、导出、分叉和整理会话;更大的应用仍可以导入库,自带界面。
 
 ## 安装
 
 ```
-pip install "convo-chain @ git+https://github.com/DaizeDong/convo-chain"
+pip install "agent-conversation-history @ git+https://github.com/DaizeDong/agent-conversation-history"
 ```
 
-或者在检出目录里 `pip install .`。需要 Python 3.11 或更新。wheel 是 `py3-none-any`,没有依赖。
+或者在检出目录里 `pip install .`。需要 Python 3.10 或更新。wheel 是 `py3-none-any`,没有依赖。
 
 ## 快速上手
 
 ```
-convo-chain chain 00000000-0000-4000-8000-000000000000 --root C:/Users/you/.claude/projects
+agent-conversation-history chain  SID [--leaf U] [--sub AGENT]
+agent-conversation-history node   SID UUID [--sub AGENT]
+agent-conversation-history export SID --to U [--from U] [--leaf U] [--sub AGENT]
+                                  [--tools] [--thinking] [--out FILE] [--this-file-only]
+agent-conversation-history fork   SID AT [--leaf U] [--id UUID] [--title-suffix S] [--partial]
+agent-conversation-history inline (SID | --all) [--sessions-dir DIR]
+agent-conversation-history serve  [--host H] [--port N] [--sessions-dir DIR] [--export-dir DIR]
+                                  [--allowed-host H] [--allow-remote] [--log-header NAME]
+agent-conversation-history --version
 ```
 
-`--root` 是按项目分文件夹、每个文件夹里放 `<会话 id>.jsonl` 的那个目录。不想每次都传,可以设 `CONVO_CHAIN_ROOT`。输出是 stdout 上的 JSON。
+每个子命令都带 `--root DIR`。没给时命令行依次用 `AGENT_CONVERSATION_HISTORY_ROOT`、`$CLAUDE_CONFIG_DIR/projects`、`~/.claude/projects`。`AT` 可以是节点 uuid、`leaf`(当前末端)、`last-human`(最后一条用户消息)、`before-last-human`(它之前的那个节点,也就是那条消息发出之前的状态)或 `before:UUID`(该节点的父节点)。`fork --id UUID` 指定新会话的 id 并且幂等:这个会话已存在就什么都不写,带 `reused: true` 返回已有的结果。分叉结果里有 `newId`、`file`、`cwd`、`command`(`claude --resume` 那一行)、`title`、`at`、`forkedFrom` 和 `warnings`。
 
-## 库 API
-
-```python
-import convo_chain as cc
-
-root = "C:/Users/you/.claude/projects"          # 永远由调用方传入,从不读环境变量
-cc.shape(sid, leaf=leaf)                          # id 形状闸,在碰文件系统之前就抛
-r = cc.chain(sid, leaf=None, sub=None, root=root) # 按轮切好的显示链,带分叉
-n = cc.node(sid, uuid, sub=None, root=root)       # 一个节点的完整内容,按偏移读回
-md = cc.export_md(sid, to=uuid, frm=None, include_tools=False, include_thinking=False, root=root)
-f = cc.fork(sid, at=uuid, leaf=None, root=root)   # 在源文件旁边写一份 <newId>.jsonl,带整段历史
-md = cc.export_full(sid, to=uuid, root=root)      # export_md 外加父会话更早的历史
-cc.inline_ancestors(sid, root=root, is_live=None) # 把那段更早的历史写进会话自己的文件
-print(f["command"])                               # cd '<cwd>'; claude --resume <newId>
-```
-
-另提供 `dependents(sid, root)`、`rename(sid, title, root=...)`、`move(sid, target_project, root=...)`、`delete_plan`、`delete`、`project_info`、`recover_pending`、`locate`、`resume_command`、`clear_cache`、`CACHE_SLOTS`，以及转录规则 `typed_text(entry)` 和 `looks_injected(text)`。
-
-错误分两种,互不继承。`ConvoChainError` 是请求被拒,带一个稳定的 `.code`(`bad_id`、`bad_sub`、`bad_leaf`、`bad_uuid`、`not_found`、`ambiguous`、`outside_root`、`not_on_path`、`bad_range`、`stale_index`、`exists`、`inside_repo`、`unrelinkable`、`empty_fork`、`no_sub_fork`、`unavailable` 等)。`Unavailable` 是没有可用的根目录:`chain` 和 `node` 遇到它返回 `{"available": false, "reason": ...}`,`export_md` 和 `fork` 则抛 code 为 `unavailable` 的 `ConvoChainError`。
-
-## CLI
-
-```
-convo-chain chain  SID [--leaf U] [--sub AGENT]                  [--root DIR]
-convo-chain node   SID UUID [--sub AGENT]                        [--root DIR]
-convo-chain export SID --to U [--from U] [--leaf U] [--sub AGENT]
-                   [--tools] [--thinking] [--out FILE]           [--root DIR]
-convo-chain fork   SID AT [--leaf U] [--partial]                 [--root DIR]
-convo-chain inline [SID | --all] [--sessions-dir DIR]            [--root DIR]
-convo-chain serve  [--host H] [--port N] [--sessions-dir DIR] [--export-dir DIR]
-                   [--allowed-host H] [--allow-remote] [--log-header NAME] [--root DIR]
-convo-chain --version
-```
-
-退出码:`0` 成功,`1` 被拒(stdout 上是 `{"error": {"code", "message"}}`),`2` 用法错误,`3` 未检查(没有可用的根目录),`4` 内部故障(stdout 上是 `{"error": {"code": "internal", "message": <异常类名>}}`,说明是程序缺陷或文件读不了,不是拒绝)。显式给了 `--root`,哪怕是 `--root ""`,也绝不会被 `CONVO_CHAIN_ROOT` 顶替。`export --out` 把 Markdown 独占创建写进文件,目标在 git 工作树里就拒绝,理由和 `fork` 一样。`python -m convo_chain` 用法相同。
+退出码:`0` 成功,`1` 被拒(stdout 上是 `{"error": {"code", "message"}}`),`2` 用法错误,`3` 未检查(没有可用的根目录),`4` 内部故障(stdout 上是 `{"error": {"code": "internal", "message": <异常类名>}}`,说明是程序缺陷或文件读不了,不是拒绝)。显式给了 `--root`,哪怕是 `--root ""`,也绝不会被 `AGENT_CONVERSATION_HISTORY_ROOT` 顶替。`export --out` 把 Markdown 独占创建写进文件,目标在 git 工作树里就拒绝,理由和 `fork` 一样。`python -m agent_conversation_history` 用法相同。
 
 CLI 每次调用都重建索引。长期运行的调用方应该直接导入这个库,让缓存在请求之间留住。
 
@@ -91,12 +65,12 @@ Claude Code 写出的分叉或续写会话有两种形态:要么新文件带着�
 ## 网页界面
 
 ```
-convo-chain serve --root ~/.claude/projects
+agent-conversation-history serve --root ~/.claude/projects
 ```
 
 起一个零依赖的本地服务(默认 `127.0.0.1:8765`):项目和会话列表、按轮阅读、导出 Markdown(下载或存到服务器)、重命名、分叉、带恢复的回收站,以及 Claude Code 是否还开着这个会话的标记(最近有对话是绿色,窗口开着但没动静则是黄色并写出空闲多久)。删除会话是挪进回收站项目;如果别的会话的更早历史只在它里面,会先把那段历史写进那个会话,而那个会话开着时拒绝删除。
 
-它没有登录。默认只绑回环地址,除非给 `--allow-remote`;只接受回环 `Host` 头加上 `--allowed-host` 指定的;写操作只收 `application/json` 且 `Origin` 要和 `Host` 一致;导出文件权限 0600。要对外就放在你自己的认证反向代理后面。`--sessions-dir` 指向 Claude Code 的活跃会话登记目录(默认 `~/.claude/sessions`),`--export-dir` 是导出目录(默认 `~/convo-chain-exports`,可以写 `%Y-%m` 这类 strftime 代码),`--log-header` 指定一个请求头,其值会和写操作一起记进日志。
+它没有登录。默认只绑回环地址,除非给 `--allow-remote`;只接受回环 `Host` 头加上 `--allowed-host` 指定的;写操作只收 `application/json` 且 `Origin` 要和 `Host` 一致;导出文件权限 0600。要对外就放在你自己的认证反向代理后面。`--sessions-dir` 指向 Claude Code 的活跃会话登记目录(默认 `~/.claude/sessions`),`--export-dir` 是导出目录(默认 `~/agent-conversation-history-exports`,可以写 `%Y-%m` 这类 strftime 代码),`--log-header` 指定一个请求头,其值会和写操作一起记进日志。
 
 ## 数据放在哪
 
@@ -107,7 +81,7 @@ convo-chain serve --root ~/.claude/projects
 `rename(sid, title, root=...)` 追加原生标题记录并更新索引；`move(sid, target_project, root=...)`
 保留转录字节和会话 ID，迁移完整子目录并更新两边索引。目标必须是根目录内已有的项目目录。
 正在写入的文件、同名冲突、链接和跨卷移动会被拒绝。恢复记录放在调用方根目录的
-`.convo-chain-ops` 下，`recover_pending(root)` 可回退中断的操作，后续修改也会先执行恢复。
+`.agent-conversation-history-ops` 下，`recover_pending(root)` 可回退中断的操作，后续修改也会先执行恢复。
 根锁协调本库的调用方，文件占用和前后状态检查用于发现其他程序的干扰；移动前应关闭写入该会话的程序。
 `fork` 可接收 UUID 形式的 `request_id`，响应丢失后沿用它重试会返回同一份新会话。
 恢复命令优先采用存储目录的元数据，不改写历史消息中的工作目录。

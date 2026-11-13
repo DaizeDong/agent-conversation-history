@@ -548,7 +548,7 @@ async function boot(){
   try{
     const h = await api('/api/health');
     state.health = h;
-    $('#hstat').textContent = 'convo-chain ' + h.version + ' · ' + h.live + ' 个会话正开着';
+    $('#hstat').textContent = 'agent-conversation-history ' + h.version + ' · ' + h.live + ' 个会话正开着';
     await loadProjects();
     if(state.view === 'trash') await loadTrash();
     else if(state.project) await loadSessions(state.project);

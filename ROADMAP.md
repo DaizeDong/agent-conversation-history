@@ -11,7 +11,7 @@ Design details are documented in the source and [README.md](README.md); released
 - `node`: one line's full content, capped per field and in total.
 - `export_md`: a Markdown export of any range on the chain, capped and saying where it stopped.
 - `fork`: a new session file holding exactly the context the model saw at a node, relinked the way Claude Code loads a compacted session, created exclusively and never inside a git work tree.
-- The `convo-chain` CLI over the same four operations.
+- The `agent-conversation-history` CLI over the same four operations.
 - Calibrated against the shared data boundary guard: the transcript names this tool writes are declared as run-shape probes and every one is recognised.
 
 - Rename and move with native index updates, sidecar preservation and recovery journals.

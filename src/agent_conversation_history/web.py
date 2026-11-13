@@ -1,4 +1,4 @@
-"""convo-chain serve:会话浏览、导出、改名、分叉、回收站的本地网页界面,只用标准库。
+"""agent-conversation-history serve:会话浏览、导出、改名、分叉、回收站的本地网页界面,只用标准库。
 
 会话原文里常有凭据和内部细节,所以:
   - 默认只绑回环地址;要绑别的地址必须显式 --allow-remote,而且这里没有登录,
@@ -24,7 +24,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import __version__, core, lineage
-from .errors import ConvoChainError, Unavailable
+from .errors import ConversationHistoryError, Unavailable
 from .session_ops import move, rename
 from .transcript import looks_injected, typed_text
 
@@ -32,7 +32,7 @@ TRASH_PROJECT = "trash-convo-console"
 STATIC = Path(__file__).parent / "web_static"
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
-log = logging.getLogger("convo-chain.web")
+log = logging.getLogger("agent-conversation-history.web")
 
 
 class Refused(Exception):
@@ -255,6 +255,8 @@ def _pid_is_claude(pid: int) -> bool:
         cmd = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
         return True                         # 没有 /proc(macOS、Windows):只认进程存在
+    if not cmd.strip(b"\0"):
+        return True                         # 正好在 execve 里或是僵尸进程,命令行读成空:宁可当作还开着
     return b"claude" in cmd.lower()
 
 
@@ -371,7 +373,7 @@ def _title(body: dict) -> str:
 
 def make_handler(app: App, allowed_hosts: set, log_header: str | None):
     class Handler(BaseHTTPRequestHandler):
-        server_version = f"convo-chain/{__version__}"
+        server_version = f"agent-conversation-history/{__version__}"
 
         def log_message(self, fmt, *args):      # 访问日志不打,写操作在 _finish 里单独记
             pass
@@ -405,7 +407,7 @@ def make_handler(app: App, allowed_hosts: set, log_header: str | None):
                 return fn()
             except Refused as e:
                 self._error(e.status, e.code, e.message)
-            except ConvoChainError as e:
+            except ConversationHistoryError as e:
                 self._error(400, e.code, str(e))
             except Unavailable as e:
                 self._error(503, "unavailable", str(e))
@@ -486,12 +488,12 @@ def serve(root: str, host: str = "127.0.0.1", port: int = 8765, sessions_dir: st
         return 3
     app = App(str(rootp),
               str(Path(sessions_dir).expanduser()) if sessions_dir else str(Path.home() / ".claude" / "sessions"),
-              str(Path(export_dir).expanduser()) if export_dir else str(Path.home() / "convo-chain-exports"))
+              str(Path(export_dir).expanduser()) if export_dir else str(Path.home() / "agent-conversation-history-exports"))
     hosts = set(LOOPBACK) | {h.lower() for h in allowed_hosts}
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     srv = ThreadingHTTPServer((host, port), make_handler(app, hosts, log_header))
     srv.daemon_threads = True
-    log.info("convo-chain %s serving %s on http://%s:%s", __version__, rootp, host, port)
+    log.info("agent-conversation-history %s serving %s on http://%s:%s", __version__, rootp, host, port)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

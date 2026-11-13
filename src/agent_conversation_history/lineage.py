@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import core
 from . import transactions as T
-from .errors import ConvoChainError, Unavailable
+from .errors import ConversationHistoryError, Unavailable
 
 MAX_DEPTH = 12           # 祖先最多往上找这么多层
 HEAD_RECORDS = 80        # 判断「这个文件是不是从压缩边界开头」时看的行数
@@ -110,7 +110,7 @@ def parent_of(sid: str, root: str) -> str | None:
             for f in _files_containing(root, needles, path):
                 try:
                     pix = core._load(f.stem, None, root)[1]
-                except (ConvoChainError, Unavailable, OSError):
+                except (ConversationHistoryError, Unavailable, OSError):
                     continue
                 p = first_shared_pos(ix, pix)
                 if p is not None and p > best:
@@ -128,7 +128,7 @@ def missing_ancestors(sid: str, root: str) -> dict | None:
             return None
         _l, ix, _c = core._load(sid, None, root)
         _l2, pix, _c2 = core._load(par, None, root)
-    except (ConvoChainError, Unavailable, OSError):
+    except (ConversationHistoryError, Unavailable, OSError):
         return None
     p = first_shared_pos(ix, pix)
     if not p:
@@ -254,14 +254,14 @@ def inline_ancestors(sid: str, *, root: str, is_live=None) -> dict:
     它之后写的东西落进一个已经被顶掉的旧文件。"""
     core.shape(sid)
     if is_live is not None and is_live(sid):
-        raise ConvoChainError("这个会话正开着,先关掉窗口再补全前史", "session_live")
+        raise ConversationHistoryError("这个会话正开着,先关掉窗口再补全前史", "session_live")
     loc, ix, _c = core._load(sid, None, root)
     path = loc["main"]
     if loc["gz"]:
-        raise ConvoChainError("压缩存放的会话文件不改写", "gz")
+        raise ConversationHistoryError("压缩存放的会话文件不改写", "gz")
     base = core._base(root).resolve()
     if core._enclosing_worktree(base) is not None:
-        raise ConvoChainError("会话修改不能写入未验证的数据仓库,请使用仓库外的会话根目录", "inside_repo")
+        raise ConversationHistoryError("会话修改不能写入未验证的数据仓库,请使用仓库外的会话根目录", "inside_repo")
     m = missing_ancestors(sid, root)
     if m is None:
         return {"id": sid, "inlined": 0, "unchanged": True}
@@ -275,7 +275,7 @@ def inline_ancestors(sid: str, *, root: str, is_live=None) -> dict:
     with path.open("rb") as fh:
         data = fh.read()
     if len(data) != st.st_size:
-        raise ConvoChainError("文件在读取期间被写入,请稍后重试", "busy")
+        raise ConversationHistoryError("文件在读取期间被写入,请稍后重试", "busy")
     blob = ("\n".join(prefix) + "\n").encode("utf-8")
     tmp = path.parent / f".inline-{sid}.tmp"
     with ExitStack() as stack:
@@ -294,10 +294,10 @@ def inline_ancestors(sid: str, *, root: str, is_live=None) -> dict:
             new_leaf = nix.E[core._leaf_k(nix, None)[0]]["u"]
             if (new_leaf != old_leaf or nix.bad > ix.bad or nix.dupUuids > ix.dupUuids
                     or len(nix.E) != len(ix.E) + len(prefix)):
-                raise ConvoChainError("补全后的文件没通过核对,没有替换原文件", "verify_failed")
+                raise ConversationHistoryError("补全后的文件没通过核对,没有替换原文件", "verify_failed")
             now = path.stat()
             if (now.st_size, now.st_mtime_ns) != (st.st_size, st.st_mtime_ns):
-                raise ConvoChainError("文件在补全期间被写入,没有替换", "busy")
+                raise ConversationHistoryError("文件在补全期间被写入,没有替换", "busy")
             os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))     # 列表按修改时间排,别把它顶到最前
             os.chmod(tmp, st.st_mode & 0o7777)
             os.replace(tmp, path)

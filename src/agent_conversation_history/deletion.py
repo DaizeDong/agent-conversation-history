@@ -7,13 +7,13 @@ import json
 import re
 
 from . import core, session_ops as S, transactions as T
-from .errors import ConvoChainError
+from .errors import ConversationHistoryError
 
 
 def _project_id(value):
     if (not isinstance(value, str) or not value or value.startswith(".")
             or len(value) > 255 or any(c in value for c in "/\\:")):
-        raise ConvoChainError("来源项目标识不正确", "bad_project")
+        raise ConversationHistoryError("来源项目标识不正确", "bad_project")
     return value
 
 
@@ -21,10 +21,10 @@ def _binding(sid, expected_project, fingerprint, request_id):
     core.shape(sid)
     _project_id(expected_project)
     if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
-        raise ConvoChainError("删除预览无效，请重新查看删除范围", "bad_fingerprint")
+        raise ConversationHistoryError("删除预览无效，请重新查看删除范围", "bad_fingerprint")
     if not isinstance(request_id, str) or not re.fullmatch(
             r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", request_id):
-        raise ConvoChainError("删除请求标识无效", "bad_request_id")
+        raise ConversationHistoryError("删除请求标识无效", "bad_request_id")
     return {"id": sid, "projectDir": expected_project, "fingerprint": fingerprint,
             "requestId": request_id.lower()}
 
@@ -71,11 +71,11 @@ def delete_plan(sid, *, root, expected_project):
         with T.locked(base), ExitStack() as stack:
             return _prepare(sid, base, expected_project, stack)[0]
     except OSError as error:
-        raise ConvoChainError("会话或关联文件正在使用或无法读取，请关闭后重试", "busy") from error
+        raise ConversationHistoryError("会话或关联文件正在使用或无法读取，请关闭后重试", "busy") from error
 
 
 def _receipt_path(base, request_id):
-    directory = T.safe_path(base, ".convo-chain-ops/delete-receipts")
+    directory = T.safe_path(base, ".agent-conversation-history-ops/delete-receipts")
     directory.mkdir(exist_ok=True)
     return directory / (request_id + ".json")
 
@@ -95,7 +95,7 @@ def _replayed(base, binding):
         if result["deleted"] is not True or result["id"] != binding["id"]:
             raise ValueError("receipt result")
     except (ValueError, KeyError, TypeError) as error:
-        raise ConvoChainError("删除请求与已有记录不一致，未删除任何新文件", "conflict") from error
+        raise ConversationHistoryError("删除请求与已有记录不一致，未删除任何新文件", "conflict") from error
     return {**result, "unchanged": True}
 
 
@@ -107,13 +107,13 @@ def _remaining_matches(path, expected):
     current = T.snapshot(path)
     for key in ("device", "inode", "directory"):
         if current[key] != expected[key]:
-            raise ConvoChainError("待删除文件已被替换，已保留现场", "recovery_conflict")
+            raise ConversationHistoryError("待删除文件已被替换，已保留现场", "recovery_conflict")
     if not current["directory"]:
         if current != expected:
-            raise ConvoChainError("待删除文件发生变化，已保留现场", "recovery_conflict")
+            raise ConversationHistoryError("待删除文件发生变化，已保留现场", "recovery_conflict")
         return
     if not current["children"].keys() <= expected["children"].keys():
-        raise ConvoChainError("待删除目录出现新文件，已保留现场", "recovery_conflict")
+        raise ConversationHistoryError("待删除目录出现新文件，已保留现场", "recovery_conflict")
     for name in current["children"]:
         _remaining_matches(path / name, expected["children"][name])
 
@@ -127,7 +127,7 @@ def _purge(path, expected):
             _purge(path / name, child)
         T.ordinary(path)
         if T.snapshot(path) != {**expected, "children": {}}:
-            raise ConvoChainError("待删除目录发生变化，已保留现场", "recovery_conflict")
+            raise ConversationHistoryError("待删除目录发生变化，已保留现场", "recovery_conflict")
         path.rmdir()
     else:
         with T.reserve(path):
@@ -140,7 +140,7 @@ def finish_committed(base, journal_path, data):
     try:
         meta = data["deletion"]
         binding = _binding(meta["id"], meta["projectDir"], meta["fingerprint"], meta["requestId"])
-        stage_relative = ".convo-chain-ops/deleting-" + binding["requestId"]
+        stage_relative = ".agent-conversation-history-ops/deleting-" + binding["requestId"]
         stage = T.safe_path(base, stage_relative)
         moves = data["moves"]
         expected_names = {binding["id"] + ".jsonl", binding["id"]}
@@ -180,13 +180,13 @@ def finish_committed(base, journal_path, data):
             result["warnings"].append("会话文件已删除，操作记录将在下次操作时清理")
         return result
     except (KeyError, TypeError, ValueError) as error:
-        raise ConvoChainError("删除恢复记录不完整或路径不安全，已保留文件", "recovery_conflict") from error
-    except ConvoChainError as error:
+        raise ConversationHistoryError("删除恢复记录不完整或路径不安全，已保留文件", "recovery_conflict") from error
+    except ConversationHistoryError as error:
         if error.code != "busy":
             raise
-        raise ConvoChainError("会话已从列表移除，但部分文件尚未清理。请关闭相关程序，再重试此删除请求", "cleanup_pending") from error
+        raise ConversationHistoryError("会话已从列表移除，但部分文件尚未清理。请关闭相关程序，再重试此删除请求", "cleanup_pending") from error
     except OSError as error:
-        raise ConvoChainError("会话已从列表移除，但部分文件尚未清理。请关闭相关程序，再重试此删除请求", "cleanup_pending") from error
+        raise ConversationHistoryError("会话已从列表移除，但部分文件尚未清理。请关闭相关程序，再重试此删除请求", "cleanup_pending") from error
 
 
 def delete(sid, *, root, expected_project, fingerprint, request_id):
@@ -207,11 +207,11 @@ def delete(sid, *, root, expected_project, fingerprint, request_id):
             with ExitStack() as stack:
                 plan, items, changes = _prepare(sid, base, expected_project, stack)
                 if plan["fingerprint"] != fingerprint:
-                    raise ConvoChainError("会话或索引已改变，请重新预览后确认删除", "conflict")
-                stage = T.safe_path(base, ".convo-chain-ops/deleting-" + binding["requestId"])
+                    raise ConversationHistoryError("会话或索引已改变，请重新预览后确认删除", "conflict")
+                stage = T.safe_path(base, ".agent-conversation-history-ops/deleting-" + binding["requestId"])
                 stage.mkdir(exist_ok=True)
                 if any(stage.iterdir()):
-                    raise ConvoChainError("该删除请求已有待恢复的文件，已停止修改", "recovery_conflict")
+                    raise ConversationHistoryError("该删除请求已有待恢复的文件，已停止修改", "recovery_conflict")
                 st = stage.stat()
                 for item in items:
                     name = (base / item["source"]).name
@@ -224,7 +224,7 @@ def delete(sid, *, root, expected_project, fingerprint, request_id):
                     source, target = base / item["source"], base / item["target"]
                     T.rename_no_replace(source, target)
                     if T.snapshot(target) != item["snapshot"]:  # 同上:锁已持有,不能对同一 inode 再 flock
-                        raise ConvoChainError("会话在删除过程中发生变化，已保留恢复记录", "recovery_conflict")
+                        raise ConversationHistoryError("会话在删除过程中发生变化，已保留恢复记录", "recovery_conflict")
                 T.apply_indexes(base, changes)
                 data.update(kind="delete", status="committed")
                 T.save(pending, data)
@@ -234,7 +234,7 @@ def delete(sid, *, root, expected_project, fingerprint, request_id):
             if pending is not None and not committed:
                 T.recover_one(base, pending)
             if isinstance(error, OSError):
-                raise ConvoChainError("会话文件正在使用或无法修改，请关闭相关程序后重试", "busy") from error
+                raise ConversationHistoryError("会话文件正在使用或无法修改，请关闭相关程序后重试", "busy") from error
             raise
         finally:
             if stage is not None and not committed and stage.exists():

@@ -1,20 +1,20 @@
-"""convo-chain 自己的两种错误。
+"""agent-conversation-history 自己的两种错误。
 
 两种错误回答的是两个不同的问题,所以是两个互不继承的类:
 
-  ConvoChainError  请求本身不对(形状、找不到、不在链上、目标已存在……)。带一个稳定的 code,
+  ConversationHistoryError  请求本身不对(形状、找不到、不在链上、目标已存在……)。带一个稳定的 code,
                    调用方按 code 分辨是哪一道闸拦的,不按消息文字。
   Unavailable      会话根目录没给、不是绝对路径或不存在。它不是「请求错了」,是「这一栏没检查」,
                    调用方应当把它显示成未检查,而不是报错。
 
-让 Unavailable 继承 ConvoChainError 的话,一个 `except ConvoChainError` 就会把「没检查」吞成
+让 Unavailable 继承 ConversationHistoryError 的话,一个 `except ConversationHistoryError` 就会把「没检查」吞成
 一个 400,而那正是这两者分开的理由。
 """
 
 from __future__ import annotations
 
 
-class ConvoChainError(Exception):
+class ConversationHistoryError(Exception):
     """被某一道闸拒绝的请求。
 
     带 code 不只是为了好看:多道闸互相兜底时,「抛了异常」证明不了是哪一道抛的。

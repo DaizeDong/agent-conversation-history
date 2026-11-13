@@ -9,7 +9,7 @@ import unicodedata
 
 from . import core
 from . import transactions as T
-from .errors import ConvoChainError
+from .errors import ConversationHistoryError
 
 INDEX_MAX = 8 << 20
 
@@ -20,15 +20,15 @@ def _project(root, project):
     path = Path(raw)
     if not path.is_absolute():
         if not raw or raw in (".", "..") or any(c in raw for c in "/\\:") or len(raw) > 255:
-            raise ConvoChainError("项目位置不是有效的目录标识", "bad_project")
+            raise ConversationHistoryError("项目位置不是有效的目录标识", "bad_project")
         path = base / raw
     if path.parent.resolve() != base or not core._inside(base, path):
-        raise ConvoChainError("项目位置不在会话根目录内", "outside_root")
+        raise ConversationHistoryError("项目位置不在会话根目录内", "outside_root")
     if not path.is_dir() or path.resolve().parent != base:
-        raise ConvoChainError("目标项目目录不存在或经过了目录联接", "bad_project")
+        raise ConversationHistoryError("目标项目目录不存在或经过了目录联接", "bad_project")
     T.ordinary(path)
     if path.name.startswith("."):
-        raise ConvoChainError("内部管理目录不能作为会话位置", "bad_project")
+        raise ConversationHistoryError("内部管理目录不能作为会话位置", "bad_project")
     return base, path
 
 
@@ -37,18 +37,18 @@ def _read_index(project):
     if not path.exists():
         return None
     if path.is_symlink() or path.stat().st_size > INDEX_MAX:
-        raise ConvoChainError("会话索引不是可安全更新的小型文件", "bad_index")
+        raise ConversationHistoryError("会话索引不是可安全更新的小型文件", "bad_index")
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as error:
-        raise ConvoChainError("会话索引无法读取，请先修复索引", "bad_index") from error
+        raise ConversationHistoryError("会话索引无法读取，请先修复索引", "bad_index") from error
     if not isinstance(data, dict) or not isinstance(data.get("entries", []), list):
-        raise ConvoChainError("会话索引格式不正确", "bad_index")
+        raise ConversationHistoryError("会话索引格式不正确", "bad_index")
     if any(not isinstance(entry, dict) for entry in data.get("entries", [])):
-        raise ConvoChainError("会话索引包含无效条目", "bad_index")
+        raise ConversationHistoryError("会话索引包含无效条目", "bad_index")
     ids = [e.get("sessionId") for e in data.get("entries", []) if e.get("sessionId")]
     if any(not isinstance(sid, str) for sid in ids) or len(ids) != len(set(ids)):
-        raise ConvoChainError("会话索引包含重复或无效的会话号", "bad_index")
+        raise ConversationHistoryError("会话索引包含重复或无效的会话号", "bad_index")
     return data
 
 
@@ -88,7 +88,7 @@ def project_info(project_dir, *, root, candidates=None):
 def _writable(root):
     base = core._base(root).resolve()
     if core._enclosing_worktree(base) is not None:
-        raise ConvoChainError("会话修改不能写入未验证的数据仓库，请使用仓库外的会话根目录", "inside_repo")
+        raise ConversationHistoryError("会话修改不能写入未验证的数据仓库，请使用仓库外的会话根目录", "inside_repo")
     return base
 
 
@@ -124,10 +124,10 @@ def _source(sid, base, expected_project=None):
     loc = core.locate(sid, root=base)
     _project(base, loc["projectDir"])
     if expected_project is not None and loc["projectDir"].name != expected_project:
-        raise ConvoChainError("会话位置已改变，请刷新后再操作", "conflict")
+        raise ConversationHistoryError("会话位置已改变，请刷新后再操作", "conflict")
     T.ordinary(loc["main"])
     if loc["main"].stat().st_nlink != 1:
-        raise ConvoChainError("会话文件有硬链接，不能安全修改", "unsafe_path")
+        raise ConversationHistoryError("会话文件有硬链接，不能安全修改", "unsafe_path")
     return loc["main"]
 
 
@@ -136,7 +136,7 @@ def rename(sid, title, *, root, expected_project=None):
     core.shape(sid)
     if (not isinstance(title, str) or not title.strip() or len(title) > 200
             or any(unicodedata.category(c) in ("Cc", "Cs") for c in title)):
-        raise ConvoChainError("标题须为 1 到 200 个字符，不能包含换行或控制字符", "bad_title")
+        raise ConversationHistoryError("标题须为 1 到 200 个字符，不能包含换行或控制字符", "bad_title")
     title = title.strip()
     base = _writable(root)
     pending = None
@@ -165,7 +165,7 @@ def rename(sid, title, *, root, expected_project=None):
                         try:
                             json.loads(tail.split(b"\n")[-1])
                         except ValueError as error:
-                            raise ConvoChainError("会话尾部尚未写入完整，请关闭会话后重试", "busy") from error
+                            raise ConversationHistoryError("会话尾部尚未写入完整，请关闭会话后重试", "busy") from error
                         separator = b"\n"
                 appended = b""
                 if ix.customTitle != title:
@@ -190,7 +190,7 @@ def rename(sid, title, *, root, expected_project=None):
             if pending is not None:
                 T.recover_one(base, pending)
             if isinstance(error, OSError):
-                raise ConvoChainError("会话文件正在使用或无法写入，请关闭相关会话后重试", "busy") from error
+                raise ConversationHistoryError("会话文件正在使用或无法写入，请关闭相关会话后重试", "busy") from error
             raise
         finally:
             core.clear_cache()
@@ -204,7 +204,7 @@ def move(sid, target_project, *, root, expected_project=None):
     core.shape(sid)
     if (not isinstance(target_project, str) or not target_project or target_project in (".", "..")
             or len(target_project) > 255 or any(c in target_project for c in "/\\:")):
-        raise ConvoChainError("目标必须是列表里的项目目录标识", "bad_project")
+        raise ConversationHistoryError("目标必须是列表里的项目目录标识", "bad_project")
     base = _writable(root)
     pending = None
     with T.locked(base) as folder:
@@ -216,16 +216,16 @@ def move(sid, target_project, *, root, expected_project=None):
                 if source.parent == destination:
                     return _location_result(sid, destination, base, unchanged=True)
                 if expected_project is not None and source.parent.name != expected_project:
-                    raise ConvoChainError("会话位置已改变，请刷新后再移动", "conflict")
+                    raise ConversationHistoryError("会话位置已改变，请刷新后再移动", "conflict")
                 if source.stat().st_dev != destination.stat().st_dev:
-                    raise ConvoChainError("只能在同一磁盘卷内迁移会话", "cross_volume")
+                    raise ConversationHistoryError("只能在同一磁盘卷内迁移会话", "cross_volume")
                 sidecar = source.parent / sid
                 paths = [source] + ([sidecar] if sidecar.exists() else [])
                 # Refuse dangling links/collisions even when there is no source sidecar.
                 for target in (destination / source.name, destination / sid):
                     T.ordinary(target)
                     if target.exists():
-                        raise ConvoChainError("目标位置已有同名会话或关联目录，未覆盖任何文件", "exists")
+                        raise ConversationHistoryError("目标位置已有同名会话或关联目录，未覆盖任何文件", "exists")
                 T.ordinary(sidecar)
                 moves = []
                 for path in paths:
@@ -235,7 +235,7 @@ def move(sid, target_project, *, root, expected_project=None):
                 old_path, old_before, old_index = _index(source.parent, stack)
                 new_path, new_before, new_index = _index(destination, stack)
                 if any(e.get("sessionId") == sid for e in new_index["entries"]):
-                    raise ConvoChainError("目标索引已有这个会话，请先检查重复记录", "exists")
+                    raise ConversationHistoryError("目标索引已有这个会话，请先检查重复记录", "exists")
                 info = project_info(destination, root=base)
                 entry = next((e for e in old_index["entries"] if e.get("sessionId") == sid),
                              {"sessionId": sid})
@@ -254,7 +254,7 @@ def move(sid, target_project, *, root, expected_project=None):
                     _rename_no_replace(base / item["source"], base / item["target"])
                     target = base / item["target"]
                     if target.is_dir() and T.snapshot(target) != item["snapshot"]:  # 文件锁在改名前已由 stack 持有,同 inode 再抢一次必败
-                        raise ConvoChainError("关联文件在迁移时发生变化，已保留恢复记录", "recovery_conflict")
+                        raise ConversationHistoryError("关联文件在迁移时发生变化，已保留恢复记录", "recovery_conflict")
                 T.apply_indexes(base, changes)
                 warnings = T.commit(pending, data)
                 pending = None
@@ -264,7 +264,7 @@ def move(sid, target_project, *, root, expected_project=None):
             if pending is not None:
                 T.recover_one(base, pending, _rename_no_replace)
             if isinstance(error, OSError):
-                raise ConvoChainError("会话或关联文件正在使用，迁移已回退；请关闭写入它的会话后重试", "busy") from error
+                raise ConversationHistoryError("会话或关联文件正在使用，迁移已回退；请关闭写入它的会话后重试", "busy") from error
             raise
         finally:
             core.clear_cache()

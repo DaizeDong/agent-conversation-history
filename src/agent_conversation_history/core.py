@@ -41,7 +41,7 @@ import uuid as _uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .errors import ConvoChainError, Unavailable
+from .errors import ConversationHistoryError, Unavailable
 from .transcript import looks_injected, typed_text
 
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
@@ -114,13 +114,13 @@ class _Containment:
 
 def _check_id(sid) -> str:
     if not isinstance(sid, str) or not UUID_RE.fullmatch(sid):
-        raise ConvoChainError(f"会话 id 不是 UUID 形状: {str(sid)[:60]!r}", "bad_id")
+        raise ConversationHistoryError(f"会话 id 不是 UUID 形状: {str(sid)[:60]!r}", "bad_id")
     return sid
 
 
 def _check_uuid(u, what: str = "节点") -> str:
     if not isinstance(u, str) or not UUID_RE.fullmatch(u):
-        raise ConvoChainError(f"{what} uuid 形状不对: {str(u)[:60]!r}", "bad_uuid")
+        raise ConversationHistoryError(f"{what} uuid 形状不对: {str(u)[:60]!r}", "bad_uuid")
     return u
 
 
@@ -128,7 +128,7 @@ def _check_sub(sub):
     if sub is None or sub == "":
         return None
     if not isinstance(sub, str) or not AGENT_RE.fullmatch(sub):
-        raise ConvoChainError(f"子代理 id 形状不对: {str(sub)[:60]!r}", "bad_sub")
+        raise ConversationHistoryError(f"子代理 id 形状不对: {str(sub)[:60]!r}", "bad_sub")
     return sub
 
 
@@ -136,7 +136,7 @@ def _check_leaf(leaf):
     if leaf is None or leaf == "":
         return None
     if not isinstance(leaf, str) or not UUID_RE.fullmatch(leaf):
-        raise ConvoChainError(f"leaf 形状不对: {str(leaf)[:60]!r}", "bad_leaf")
+        raise ConversationHistoryError(f"leaf 形状不对: {str(leaf)[:60]!r}", "bad_leaf")
     return leaf
 
 
@@ -158,7 +158,7 @@ def shape(sid, sub=None, leaf=None, required=(), **nodes) -> None:
     _check_leaf(leaf)
     for name in required:
         if nodes.get(name) is None or nodes.get(name) == "":
-            raise ConvoChainError(f"缺 {name}", "bad_uuid")
+            raise ConversationHistoryError(f"缺 {name}", "bad_uuid")
     for name, v in nodes.items():
         if v is None or v == "":
             continue
@@ -168,7 +168,7 @@ def shape(sid, sub=None, leaf=None, required=(), **nodes) -> None:
 def locate(sid: str, sub: str | None = None, root: str | None = None) -> dict:
     """把会话 id(和可选的子代理 id)解析成文件。
 
-    返回 {path, projectDir, base, main, sub, gz}。形状不对抛 ConvoChainError(bad_id / bad_sub),
+    返回 {path, projectDir, base, main, sub, gz}。形状不对抛 ConversationHistoryError(bad_id / bad_sub),
     根目录没配抛 Unavailable。0 个匹配是 not_found,多于 1 个是 ambiguous:
     两个项目目录里有同名文件时挑一个看起来合理的,等于替人做了一个看不见的选择。
     """
@@ -177,12 +177,12 @@ def locate(sid: str, sub: str | None = None, root: str | None = None) -> dict:
     base = _base(root)
     hits = sorted(base.glob(f"*/{sid}.jsonl"))
     if not hits:
-        raise ConvoChainError(f"没找到会话 {sid}", "not_found")
+        raise ConversationHistoryError(f"没找到会话 {sid}", "not_found")
     if len(hits) > 1:
-        raise ConvoChainError(f"会话 {sid} 在 {len(hits)} 个项目目录里都有,拒绝猜", "ambiguous")
+        raise ConversationHistoryError(f"会话 {sid} 在 {len(hits)} 个项目目录里都有,拒绝猜", "ambiguous")
     main = hits[0]
     if not _inside(base, main):
-        raise ConvoChainError("解析出的文件不在会话根目录里", "outside_root")
+        raise ConversationHistoryError("解析出的文件不在会话根目录里", "outside_root")
     proj = main.parent
     path, gz = main, False
     if sub:
@@ -193,12 +193,12 @@ def locate(sid: str, sub: str | None = None, root: str | None = None) -> dict:
             cands.extend(sd.glob(pat))
         cands = sorted(set(cands))
         if not cands:
-            raise ConvoChainError(f"没找到子代理 {sub}", "not_found")
+            raise ConversationHistoryError(f"没找到子代理 {sub}", "not_found")
         if len(cands) > 1:
-            raise ConvoChainError(f"子代理 {sub} 有 {len(cands)} 份文件,拒绝猜", "ambiguous")
+            raise ConversationHistoryError(f"子代理 {sub} 有 {len(cands)} 份文件,拒绝猜", "ambiguous")
         path = cands[0]
         if not _inside(base, path):
-            raise ConvoChainError("解析出的子代理文件不在会话根目录里", "outside_root")
+            raise ConversationHistoryError("解析出的子代理文件不在会话根目录里", "outside_root")
         gz = path.name.endswith(".gz")
     return {"path": path, "projectDir": proj, "base": base, "main": main, "sub": sub, "gz": gz}
 
@@ -583,12 +583,12 @@ def _index(path: Path, gz: bool) -> tuple[Index, bool]:
 def _leaf_k(ix: Index, leaf) -> tuple[int, bool]:
     if leaf is None or leaf == "":
         if not ix.E:
-            raise ConvoChainError("这份转录里没有任何链条目", "empty")
+            raise ConversationHistoryError("这份转录里没有任何链条目", "empty")
         return len(ix.E) - 1, True
     _check_leaf(leaf)
     k = ix.by.get(leaf)
     if k is None:
-        raise ConvoChainError("leaf 不在这份转录里", "bad_leaf")
+        raise ConversationHistoryError("leaf 不在这份转录里", "bad_leaf")
     return k, False
 
 
@@ -933,7 +933,7 @@ def chain(sid, leaf=None, sub=None, root=None) -> dict:
         info = project_info(loc["projectDir"], root=loc["base"], candidates=[e["cwd"] for e in E])
         base.update(storagePath=info["storagePath"], storageCwd=info["cwd"],
                     locationInferred=info["locationInferred"])
-    except ConvoChainError as error:
+    except ConversationHistoryError as error:
         warnings.append(str(error))
     return base
 
@@ -960,7 +960,7 @@ def _obj(raw: bytes, u: str) -> dict:
         o = None
     if not isinstance(o, dict) or o.get("uuid") != u:
         # 偏移处读到的不是索引里那一行:文件在索引之后被改写过(不只是追加)。
-        raise ConvoChainError("转录在读取期间被改写,请重新加载", "stale_index")
+        raise ConversationHistoryError("转录在读取期间被改写,请重新加载", "stale_index")
     return o
 
 
@@ -1038,7 +1038,7 @@ def node(sid, uuid, sub=None, root=None) -> dict:
         return {"available": False, "reason": str(e)}
     k = ix.by.get(uuid)
     if k is None:
-        raise ConvoChainError("这个节点不在这份转录里", "bad_node")
+        raise ConversationHistoryError("这个节点不在这份转录里", "bad_node")
     e = ix.E[k]
     raw = _read_lines(ix, [k])[k]
     o = _obj(raw, uuid)
@@ -1094,15 +1094,15 @@ def _range(order, E, to, frm):
     pos = {E[k]["u"]: n for n, k in enumerate(order)}
     _check_uuid(to, "终点")
     if to not in pos:
-        raise ConvoChainError("终点不在当前显示的链上", "not_on_path")
+        raise ConversationHistoryError("终点不在当前显示的链上", "not_on_path")
     if frm:
         _check_uuid(frm, "起点")
         if frm not in pos:
-            raise ConvoChainError("起点不在当前显示的链上", "not_on_path")
+            raise ConversationHistoryError("起点不在当前显示的链上", "not_on_path")
     a = pos[frm] if frm else 0
     b = pos[to]
     if a > b:
-        raise ConvoChainError("起点在终点之后", "bad_range")
+        raise ConversationHistoryError("起点在终点之后", "bad_range")
     return a, b
 
 
@@ -1144,7 +1144,7 @@ def export_md(sid, to, frm=None, leaf=None, sub=None, include_tools=False,
     try:
         loc, ix, _cached = _load(sid, sub, root)
     except Unavailable as e:
-        raise ConvoChainError(str(e), "unavailable") from e
+        raise ConversationHistoryError(str(e), "unavailable") from e
     E = ix.E
     leafk, _ = _leaf_k(ix, leaf)
     order, _segof, _c, _w = _path(ix, leafk)
@@ -1312,7 +1312,7 @@ def _fork_chain(ix: Index, atk: int) -> tuple[list, int | None, list, list]:
             # 连摘要都没走到:上溯从被保留消息旁边溜进了压缩前的历史。把边界硬塞在
             # 最前面拼出来的,是一段摘要缺席、夹着从未被保留的旧消息的上下文,
             # 不是模型在这个节点真正拿到过的东西。宁可不分叉,也不静默写出它。
-            raise ConvoChainError(f"从这个节点上溯接不回压缩边界 {E[endb]['u'][:8]} 的摘要,"
+            raise ConversationHistoryError(f"从这个节点上溯接不回压缩边界 {E[endb]['u'][:8]} 的摘要,"
                           "拼不出模型在这里真正看到的上下文,拒绝分叉", "unrelinkable")
         # 走到了摘要,只是摘要的父链没接回边界。边界照样放在最前面:没有它,
         # 这份分叉在 Claude Code 眼里就不是一份压缩过的会话。
@@ -1387,38 +1387,35 @@ def _dump(o) -> str:
     return json.dumps(o, ensure_ascii=False, separators=(",", ":"))
 
 
-def fork(sid, at, leaf=None, sub=None, root=None, request_id=None, full=True) -> dict:
+def fork(sid, at, leaf=None, sub=None, root=None, request_id=None, full=True,
+         new_id=None, title_suffix=None) -> dict:
     """在节点 at 处分叉出一个新会话文件。只写一份新文件,源文件只读。
 
     full=True(默认)把 at 之前的整段显示链原样带上,经过的每个压缩边界都保留,
     新文件自带全部历史,父会话之后删掉也不丢。full=False 是老行为:只带最近一个压缩边界
-    之后模型真正看到的那一段。"""
+    之后模型真正看到的那一段。
+
+    new_id 指定新会话的 id;这个 id 的会话已经存在就不再写,直接返回已有的(reused=True)。
+    request_id 是同一件事的间接写法:由它派生一个固定的 id。title_suffix 是追加在原标题后面的
+    后缀,默认 " (fork @ 前8位)",传空串则标题不变。"""
     shape(sid, sub=sub, leaf=leaf, required=("at",), at=at)
     if request_id is not None:
         _check_uuid(request_id, "请求")
+    if new_id is not None:
+        _check_uuid(new_id, "新会话")
     if sub:
-        raise ConvoChainError("子代理的转录不能分叉成会话", "no_sub_fork")
+        raise ConversationHistoryError("子代理的转录不能分叉成会话", "no_sub_fork")
     try:
         loc, ix, _cached = _load(sid, None, root)
     except Unavailable as e:
-        raise ConvoChainError(str(e), "unavailable") from e
-    E = ix.E
-    leafk, _ = _leaf_k(ix, leaf)
-    order, _segof, _c, _w = _path(ix, leafk)
-    atk = ix.by.get(at)
-    if atk is None or atk not in set(order):
-        raise ConvoChainError("分叉点不在当前显示的链上", "not_on_path")
-    ks, endb, pres_used, notes = _full_chain(ix, atk) if full else _fork_chain(ix, atk)
-    raws = _read_lines(ix, ks)
-    kept_pres = [E[k]["u"] for k in pres_used]
-
-    new = str(_uuid.uuid5(_uuid.NAMESPACE_URL, json.dumps(
-        [str(loc["base"].resolve()), sid, at, leaf, request_id] + (["full"] if full else [])))) \
-        if request_id else str(_uuid.uuid4())
-    if request_id:
+        raise ConversationHistoryError(str(e), "unavailable") from e
+    new = new_id or (str(_uuid.uuid5(_uuid.NAMESPACE_URL, json.dumps(
+        [str(loc["base"].resolve()), sid, at, leaf, request_id] + (["full"] if full else []))))
+        if request_id else str(_uuid.uuid4()))
+    if new_id or request_id:
         try:
             existing = locate(new, root=root)
-        except ConvoChainError as error:
+        except ConversationHistoryError as error:
             if error.code != "not_found":
                 raise
         else:
@@ -1427,8 +1424,19 @@ def fork(sid, at, leaf=None, sub=None, root=None, request_id=None, full=True) ->
             result = _location_result(new, existing["projectDir"], existing["base"].resolve())
             result.update(newId=new, reused=True, title=saved["title"], lines=saved["lines"],
                           emitted=saved["chainEntries"], approxTokens=saved["bytes"] // 4,
-                          leafUuid=saved.get("leaf"), fromBoundary=None)
+                          leafUuid=saved.get("leaf"), fromBoundary=None, at=at,
+                          forkedFrom={"sessionId": sid, "messageUuid": at})
             return result
+    E = ix.E
+    leafk, _ = _leaf_k(ix, leaf)
+    order, _segof, _c, _w = _path(ix, leafk)
+    atk = ix.by.get(at)
+    if atk is None or atk not in set(order):
+        raise ConversationHistoryError("分叉点不在当前显示的链上", "not_on_path")
+    ks, endb, pres_used, notes = _full_chain(ix, atk) if full else _fork_chain(ix, atk)
+    raws = _read_lines(ix, ks)
+    kept_pres = [E[k]["u"] for k in pres_used]
+
     lines, prev, emitted_bytes, last_ua = [], None, 0, None
     included = {E[k]["u"] for k in ks}
     relinked = 0
@@ -1458,7 +1466,7 @@ def fork(sid, at, leaf=None, sub=None, root=None, request_id=None, full=True) ->
         if o.get("type") in ("user", "assistant"):
             last_ua = E[k]["u"]
     if last_ua is None:
-        raise ConvoChainError("分叉出的链里没有任何用户或助手消息,Claude Code 恢复不了它", "empty_fork")
+        raise ConversationHistoryError("分叉出的链里没有任何用户或助手消息,Claude Code 恢复不了它", "empty_fork")
     warnings = list(notes)
     if relinked:
         warnings.append(f"{relinked} 行的原父节点不在这条链上,已接到上一行")
@@ -1478,9 +1486,9 @@ def fork(sid, at, leaf=None, sub=None, root=None, request_id=None, full=True) ->
             warnings.append(f"{badr} 条 content-replacement 记录读不懂,没有并进分叉")
         lines.append(_dump({"type": "content-replacement", "sessionId": new,
                             "replacements": merged}))
-    title = _fallback_title(ix, sid)
-    lines.append(_dump({"type": "custom-title", "customTitle": f"{title} (fork @ {at[:8]})",
-                        "sessionId": new}))
+    suffix = f" (fork @ {at[:8]})" if title_suffix is None else title_suffix
+    new_title = _fallback_title(ix, sid) + suffix
+    lines.append(_dump({"type": "custom-title", "customTitle": new_title, "sessionId": new}))
     lines.append(_dump({"type": "last-prompt", "leafUuid": last_ua, "explicit": True,
                         "sessionId": new}))
     if E[atk]["t"] not in ("user", "assistant"):
@@ -1494,7 +1502,7 @@ def fork(sid, at, leaf=None, sub=None, root=None, request_id=None, full=True) ->
     cwd = info["cwd"] if not info["locationInferred"] else _resume_cwd(ix, ks, atk, d.name, warnings)
     repo = _enclosing_worktree(d)
     if repo is not None:
-        raise ConvoChainError(f"会话目录在一个 git 工作树里({repo}),分叉写出的是真实对话内容,"
+        raise ConversationHistoryError(f"会话目录在一个 git 工作树里({repo}),分叉写出的是真实对话内容,"
                       "拒绝写进任何仓库", "inside_repo")
     target = d / f"{new}.jsonl"
     # 临时名不以 .jsonl 结尾:会话面板按 *.jsonl 扫,半截文件不该出现在列表里。
@@ -1509,7 +1517,7 @@ def fork(sid, at, leaf=None, sub=None, root=None, request_id=None, full=True) ->
             from .transactions import rename_no_replace
             rename_no_replace(tmp, target)
         except FileExistsError:
-            raise ConvoChainError("目标会话文件已存在,拒绝覆盖", "exists")
+            raise ConversationHistoryError("目标会话文件已存在,拒绝覆盖", "exists")
     finally:
         try:
             tmp.unlink()
@@ -1520,12 +1528,56 @@ def fork(sid, at, leaf=None, sub=None, root=None, request_id=None, full=True) ->
             # 名字不以 .jsonl 结尾,所以它不会被当成一个会话列出来。
             warnings.append(f"临时文件没删掉({type(e).__name__}),请手动删除: {tmp}")
     return {"newId": new, "file": str(target), "cwd": cwd, "lines": len(lines),
-            "projectDir": d.name, "storagePath": str(d), "title": f"{title} (fork @ {at[:8]})",
+            "projectDir": d.name, "storagePath": str(d), "title": new_title, "at": at, "reused": False,
+            "forkedFrom": {"sessionId": sid, "messageUuid": at},
             "emitted": len(ks), "leafUuid": last_ua,
             "fromBoundary": E[endb]["u"] if endb is not None else None,
             "approxTokens": emitted_bytes // 4,
             "command": _resume_command(cwd, new, warnings),
             "warnings": warnings}
+
+
+NODE_KEYWORDS = ("leaf", "last-human", "before-last-human")
+
+
+def resolve_node(sid, spec, leaf=None, sub=None, root=None) -> str:
+    """把「分叉点」的写法换成节点 uuid。
+
+    uuid 原样返回;leaf = 当前末端;last-human = 最后一条用户消息;
+    before-last-human = 它之前的那个节点;before:<uuid> = 该节点的父节点。
+    只读,节点必须在当前显示链上。"""
+    shape(sid, sub=sub, leaf=leaf)
+    if not isinstance(spec, str) or not spec:
+        raise ConversationHistoryError("分叉点不能为空", "bad_uuid")
+    if spec not in NODE_KEYWORDS and not spec.startswith("before:"):
+        _check_uuid(spec, "分叉点")
+        return spec
+    try:
+        _loc, ix, _cached = _load(sid, sub, root)
+    except Unavailable as e:
+        raise ConversationHistoryError(str(e), "unavailable") from e
+    E = ix.E
+    order = _path(ix, _leaf_k(ix, leaf)[0])[0]
+    if spec == "leaf":
+        return E[order[-1]]["u"]
+    if spec.startswith("before:"):
+        target = spec[len("before:"):]
+        _check_uuid(target, "节点")
+        k = ix.by.get(target)
+        if k is None or k not in set(order):
+            raise ConversationHistoryError("节点不在当前显示的链上", "not_on_path")
+        p = ix.by.get(E[k]["p"]) if E[k]["p"] else None
+        if p is None:
+            raise ConversationHistoryError("这个节点没有父节点,它之前没有可分叉的状态", "no_parent")
+        return E[p]["u"]
+    humans = [n for n, k in enumerate(order) if E[k]["kind"] == "human"]
+    if not humans:
+        raise ConversationHistoryError("这份转录里没有用户消息", "no_human")
+    if spec == "last-human":
+        return E[order[humans[-1]]]["u"]
+    if humans[-1] == 0:
+        raise ConversationHistoryError("最后一条用户消息之前没有节点", "no_parent")
+    return E[order[humans[-1] - 1]]["u"]
 
 
 def _project_key(cwd: str) -> str:

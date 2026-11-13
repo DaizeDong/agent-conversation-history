@@ -1,15 +1,16 @@
-"""The `convo-chain` command line: the library's four operations, JSON on stdout.
+"""The `agent-conversation-history` command line: the library's four operations, JSON on stdout.
 
-    convo-chain chain  SID [--leaf U] [--sub AGENT]
-    convo-chain node   SID UUID [--sub AGENT]
-    convo-chain export SID --to U [--from U] [--leaf U] [--sub AGENT] [--tools] [--thinking]
+    agent-conversation-history chain  SID [--leaf U] [--sub AGENT]
+    agent-conversation-history node   SID UUID [--sub AGENT]
+    agent-conversation-history export SID --to U [--from U] [--leaf U] [--sub AGENT] [--tools] [--thinking]
                            [--out FILE]
-    convo-chain fork   SID AT [--leaf U] [--partial]
-    convo-chain inline [SID | --all] [--sessions-dir DIR]
-    convo-chain serve  [--host H] [--port N] [--sessions-dir DIR] [--export-dir DIR]
+    agent-conversation-history fork   SID AT [--leaf U] [--id UUID] [--title-suffix S] [--partial]
+                       (AT: a uuid, leaf, last-human, before-last-human or before:UUID)
+    agent-conversation-history inline [SID | --all] [--sessions-dir DIR]
+    agent-conversation-history serve  [--host H] [--port N] [--sessions-dir DIR] [--export-dir DIR]
 
 Every subcommand takes `--root DIR` (the directory holding one folder per project, each with
-`<session-id>.jsonl` files). Without it the CLI falls back to the `CONVO_CHAIN_ROOT` environment
+`<session-id>.jsonl` files). Without it the CLI falls back to the `AGENT_CONVERSATION_HISTORY_ROOT` environment
 variable. That fallback lives HERE and only here: the library itself never reads the environment,
 so a caller that embeds it decides where the root comes from.
 
@@ -37,11 +38,19 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .core import _enclosing_worktree, chain, export_md, fork, node
+from .core import _enclosing_worktree, chain, export_md, fork, node, resolve_node
 from .lineage import export_full
-from .errors import ConvoChainError
+from .errors import ConversationHistoryError
 
-ENV_ROOT = "CONVO_CHAIN_ROOT"
+ENV_ROOT = "AGENT_CONVERSATION_HISTORY_ROOT"
+
+
+def _default_root():
+    """没给 --root 也没设环境变量时的根目录:$CLAUDE_CONFIG_DIR/projects,否则 ~/.claude/projects。
+    库本身不猜目录,这个默认只在命令行里。目录不存在就返回 None,走「未检查」。"""
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    d = Path(cfg) / "projects" if cfg else Path.home() / ".claude" / "projects"
+    return str(d) if d.is_dir() else None
 
 EXIT_OK, EXIT_REFUSED, EXIT_USAGE, EXIT_UNAVAILABLE, EXIT_INTERNAL = 0, 1, 2, 3, 4
 
@@ -57,7 +66,7 @@ def _emit(obj) -> None:
         sys.stdout.write(data)
 
 
-def _refused(e: ConvoChainError) -> int:
+def _refused(e: ConversationHistoryError) -> int:
     _emit({"error": {"code": e.code, "message": str(e)}})
     return EXIT_UNAVAILABLE if e.code == "unavailable" else EXIT_REFUSED
 
@@ -73,27 +82,28 @@ def _write_out(out: str, text: str) -> str:
     p = p if p.is_absolute() else Path.cwd() / p
     repo = _enclosing_worktree(p.parent)
     if repo is not None:
-        raise ConvoChainError(f"--out is inside a git work tree ({repo}); an export is real "
+        raise ConversationHistoryError(f"--out is inside a git work tree ({repo}); an export is real "
                               "conversation text, refusing to write it into any repository",
                               "inside_repo")
     try:
         with open(p, "x", encoding="utf-8", newline="\n") as fh:
             fh.write(text)
     except FileExistsError:
-        raise ConvoChainError(f"--out already exists, refusing to overwrite: {p}", "exists")
+        raise ConversationHistoryError(f"--out already exists, refusing to overwrite: {p}", "exists")
     except OSError as e:
-        raise ConvoChainError(f"could not write --out ({type(e).__name__}): {p}", "write_failed")
+        raise ConversationHistoryError(f"could not write --out ({type(e).__name__}): {p}", "write_failed")
     return str(p)
 
 
 def _parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--root", default=None,
-                        help=f"session root directory (absolute). Defaults to ${ENV_ROOT}.")
+                        help=f"session root directory (absolute). Defaults to ${ENV_ROOT}, then "
+                             "$CLAUDE_CONFIG_DIR/projects, then ~/.claude/projects.")
     ap = argparse.ArgumentParser(
-        prog="convo-chain",
+        prog="agent-conversation-history",
         description="Rebuild, export or fork the conversation a Claude Code transcript held.")
-    ap.add_argument("--version", action="version", version=f"convo-chain {__version__}")
+    ap.add_argument("--version", action="version", version=f"agent-conversation-history {__version__}")
     sp = ap.add_subparsers(dest="cmd", required=True)
 
     c = sp.add_parser("chain", parents=[common], help="the display chain, cut into turns")
@@ -123,6 +133,8 @@ def _parser() -> argparse.ArgumentParser:
     f.add_argument("sid")
     f.add_argument("at")
     f.add_argument("--leaf")
+    f.add_argument("--id", dest="new_id", help="id for the new session; if it already exists the existing result is returned and nothing is written")
+    f.add_argument("--title-suffix", help="appended to the original title (default ' (fork @ <first 8 of AT>)'; empty string keeps the title)")
     f.add_argument("--partial", action="store_true",
                    help="copy only what the model saw after the last compaction (old behaviour)")
 
@@ -138,7 +150,7 @@ def _parser() -> argparse.ArgumentParser:
     w.add_argument("--port", type=int, default=8765)
     w.add_argument("--sessions-dir", help="Claude Code's live session registry (default ~/.claude/sessions)")
     w.add_argument("--export-dir", help="where 'save on server' writes; strftime codes allowed "
-                                        "(default ~/convo-chain-exports)")
+                                        "(default ~/agent-conversation-history-exports)")
     w.add_argument("--allowed-host", action="append", default=[],
                    help="extra Host header to accept (repeatable); loopback names are always accepted")
     w.add_argument("--allow-remote", action="store_true",
@@ -153,13 +165,13 @@ def _inline(args, root):
     app = App(root or "", args.sessions_dir or str(Path.home() / ".claude" / "sessions"), "")
     live = app.active_sessions()
     if args.all == bool(args.sid):
-        raise ConvoChainError("give exactly one of SID or --all", "bad_args")
+        raise ConversationHistoryError("give exactly one of SID or --all", "bad_args")
     todo = dependents_of_all(root) if args.all else [args.sid]
     done, skipped = [], []
     for sid in todo:
         try:
             r = inline_ancestors(sid, root=root, is_live=lambda s: s in live)
-        except ConvoChainError as e:
+        except ConversationHistoryError as e:
             if not args.all:
                 raise
             skipped.append({"id": sid, "code": e.code})
@@ -173,7 +185,7 @@ def main(argv=None) -> int:
     args = _parser().parse_args(argv)
     # An explicit --root, even an empty one, is the caller's answer and is never replaced by the
     # environment: `--root ""` must come out "not checked", not quietly read some other root.
-    root = args.root if args.root is not None else (os.environ.get(ENV_ROOT) or None)
+    root = args.root if args.root is not None else (os.environ.get(ENV_ROOT) or _default_root())
     try:
         if args.cmd == "chain":
             res = chain(args.sid, leaf=args.leaf, sub=args.sub, root=root)
@@ -193,12 +205,14 @@ def main(argv=None) -> int:
             res = _inline(args, root)
         elif args.cmd == "serve":
             from .web import serve
-            return serve(root or str(Path.home() / ".claude" / "projects"), args.host, args.port,
+            return serve(root or "", args.host, args.port,
                          args.sessions_dir, args.export_dir, args.allowed_host,
                          args.allow_remote, args.log_header)
         else:
-            res = fork(args.sid, args.at, leaf=args.leaf, root=root, full=not args.partial)
-    except ConvoChainError as e:
+            at = resolve_node(args.sid, args.at, leaf=args.leaf, root=root)
+            res = fork(args.sid, at, leaf=args.leaf, root=root, full=not args.partial,
+                       new_id=args.new_id, title_suffix=args.title_suffix)
+    except ConversationHistoryError as e:
         return _refused(e)
     except Exception as e:  # noqa: BLE001  the contract promises JSON on stdout for every outcome
         _emit({"error": {"code": "internal", "message": type(e).__name__}})

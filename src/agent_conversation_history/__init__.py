@@ -1,4 +1,4 @@
-"""convo-chain: rebuild the conversation a Claude Code session transcript actually held.
+"""agent-conversation-history: rebuild the conversation a Claude Code session transcript actually held.
 
 Public API (everything else is private and may change):
 
@@ -11,6 +11,8 @@ Public API (everything else is private and may change):
                                                        write a NEW session file forked at `at`; full
                                                        copies the whole history, full=False only what
                                                        the model saw after the last compaction
+    resolve_node(sid, spec, leaf=None, root=...)       fork point spec (uuid, leaf, last-human, before-last-human,
+                                                       before:<uuid>) to a node uuid
     export_full(sid, to, frm=None, include_tools=..., include_thinking=..., root=...)
                                                        export_md plus the parent session's earlier history
     inline_ancestors(sid, root=..., is_live=None)      write that earlier history into the session's own file
@@ -26,15 +28,15 @@ Public API (everything else is private and may change):
     typed_text(entry) / looks_injected(text)           "did a human type this" rules
     clear_cache()                                      drop the in-process index cache
 
-    ConvoChainError(msg, code)                         a refused request, with a stable .code
+    ConversationHistoryError(msg, code)                         a refused request, with a stable .code
     Unavailable                                        no usable root: "not checked", not an error
 
 `root` is always passed in by the caller. The library never reads an environment variable.
 """
 
 from .core import (CACHE_SLOTS, chain, clear_cache, export_md, fork, locate, node,
-                   resume_command, shape)
-from .errors import ConvoChainError, Unavailable
+                   resolve_node, resume_command, shape)
+from .errors import ConversationHistoryError, Unavailable
 from .session_ops import move, rename, project_info, recover_pending
 from .deletion import delete, delete_plan
 from .lineage import dependents, export_full, inline_ancestors
@@ -43,8 +45,9 @@ from .transcript import looks_injected, typed_text
 __version__ = "0.3.0"
 
 __all__ = [
-    "CACHE_SLOTS", "ConvoChainError", "Unavailable", "__version__", "chain", "clear_cache",
-    "export_md", "fork", "locate", "looks_injected", "node", "resume_command", "shape",
+    "CACHE_SLOTS", "ConversationHistoryError", "Unavailable", "__version__", "chain", "clear_cache",
+    "export_md", "fork", "locate", "looks_injected", "node", "resolve_node", "resume_command",
+    "shape",
     "typed_text", "move", "rename", "project_info", "recover_pending",
     "delete", "delete_plan", "dependents", "export_full", "inline_ancestors",
 ]

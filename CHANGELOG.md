@@ -6,7 +6,9 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ### Added
 
-- **`convo-chain serve`.** A dependency-free local web UI (standard library only) to list projects and sessions, read a conversation turn by turn, export, rename, fork, and move sessions to a recycle bin and back. Open sessions are marked from Claude Code's live registry, green when recently active and amber with the idle time otherwise; the idle time comes from the last real user or assistant line, not the file modification time. Loopback only by default, Host allowlist, JSON-only writes with an Origin check, exports written 0600.
+- **The package is now `agent-conversation-history`** (import `agent_conversation_history`, command `agent-conversation-history`, environment variable `AGENT_CONVERSATION_HISTORY_ROOT`, error class `ConversationHistoryError`, journal folder `.agent-conversation-history-ops`), and Python 3.10 is enough. The old names are not kept.
+- **Fork points for programs.** `resolve_node` and the CLI accept `leaf`, `last-human`, `before-last-human` and `before:UUID` as `AT`; `fork` takes `new_id` (`--id`, idempotent, an existing session is returned as `reused`) and `title_suffix` (`--title-suffix`) and returns `at` and `forkedFrom`. The CLI defaults its root to `$CLAUDE_CONFIG_DIR/projects`, then `~/.claude/projects`.
+- **`agent-conversation-history serve`.** A dependency-free local web UI (standard library only) to list projects and sessions, read a conversation turn by turn, export, rename, fork, and move sessions to a recycle bin and back. Open sessions are marked from Claude Code's live registry, green when recently active and amber with the idle time otherwise; the idle time comes from the last real user or assistant line, not the file modification time. Loopback only by default, Host allowlist, JSON-only writes with an Origin check, exports written 0600.
 - **`export_full` and `inline_ancestors`, CLI `inline`.** A session that starts at a compaction boundary keeps the history before it only in its parent's file. `export_full` prepends that history to an export, `inline_ancestors` writes it into the child's own file (insert before the first chain line, atomic replace after re-indexing and a leaf check, refused while the session is open), and `dependents` lists the sessions that would lose history if a given session were deleted. The web UI's delete inlines dependents first and is refused while one of them is open.
 
 ### Changed
@@ -35,15 +37,15 @@ The current package and `__version__` declare 0.3.0. No release date is recorded
 
 ### Added
 
-- **Initial extraction from task-console.** The conversation chain engine (`convtree.py`, written on an unpublished task-console feature branch for its conversation chain panel) moved here as the `convo_chain` package, behaviour unchanged: byte offset index with an in-process LRU cache, the shape gate, `locate`, `chain`, `node`, `export_md`, `fork` with exclusive create, and the resume command.
-- **Its own error types.** `ConvoChainError` (with a stable `.code`) replaces task-console's `maint.Refused`, and `Unavailable` stays a separate class so "not checked" can never be caught as a refusal.
+- **Initial extraction from task-console.** The conversation chain engine (`convtree.py`, written on an unpublished task-console feature branch for its conversation chain panel) moved here as the `agent_conversation_history` package, behaviour unchanged: byte offset index with an in-process LRU cache, the shape gate, `locate`, `chain`, `node`, `export_md`, `fork` with exclusive create, and the resume command.
+- **Its own error types.** `ConversationHistoryError` (with a stable `.code`) replaces task-console's `maint.Refused`, and `Unavailable` stays a separate class so "not checked" can never be caught as a refusal.
 - **The transcript rules, in one place.** `typed_text` and `looks_injected` moved here from task-console's `convos.py`, so the console and this library share one implementation instead of two.
-- **A CLI**, `convo-chain` (and `python -m convo_chain`): `chain`, `node`, `export` (with `--out` for a Markdown file) and `fork`, JSON on stdout for every outcome, stable exit codes (`4` with code `internal` when something other than a refusal goes wrong, naming only the exception class). An explicit `--root`, even an empty one, is never replaced by `CONVO_CHAIN_ROOT`.
+- **A CLI**, `agent-conversation-history` (and `python -m agent_conversation_history`): `chain`, `node`, `export` (with `--out` for a Markdown file) and `fork`, JSON on stdout for every outcome, stable exit codes (`4` with code `internal` when something other than a refusal goes wrong, naming only the exception class). An explicit `--root`, even an empty one, is never replaced by `AGENT_CONVERSATION_HISTORY_ROOT`.
 - Repository scaffolding: the `guards/` and `style/` submodules, `.githooks` forwarders, the pii-guard, dash-guard, tests and fleet-sync workflows, `.dataclass.json` and `.pii-allow`.
 
 ### Changed
 
-- **The root is always passed in.** The engine used to fall back to the `TASK_CONSOLE_SESSIONS` environment variable when no root was given. The library now reads no environment variable at all; only the CLI reads `CONVO_CHAIN_ROOT`, and only as the default for `--root`.
+- **The root is always passed in.** The engine used to fall back to the `TASK_CONSOLE_SESSIONS` environment variable when no root was given. The library now reads no environment variable at all; only the CLI reads `AGENT_CONVERSATION_HISTORY_ROOT`, and only as the default for `--root`.
 
 ### Fixed
 
